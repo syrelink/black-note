@@ -1,0 +1,58 @@
+# ==========================================
+# 操作系统与系统垃圾 (Global OS files)
+# ==========================================
+.DS_Store
+Thumbs.db
+*.swp
+desktop.ini
+
+# ==========================================
+# 前端项目 (black-note-app)
+# ==========================================
+black-note-app/node_modules/
+black-note-app/dist/
+black-note-app/build/
+black-note-app/.eslintcache
+black-note-app/.stylelintcache
+# 如果你不希望提交 Orval 自动生成的代码（可选）
+# black-note-app/src/api/generated/
+
+# ==========================================
+# 后端项目 (black-note-server)
+# ==========================================
+# 编译产物
+black-note-server/target/
+black-note-server/out/
+black-note-server/bin/
+*.class
+
+# 运行时日志
+black-note-server/logs/
+*.log
+
+# ==========================================
+# IDE / 编辑器配置文件 (非常重要)
+# ==========================================
+.idea/
+*.iml
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# 敏感信息与本地环境配置
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.jks
+*.p12
+*.key
+*.pem
+
+# ==========================================
+# 依赖锁文件 (建议保留其中一个)
+# ==========================================
+# 如果你团队统一使用 npm，就保留 package-lock.json，忽略 yarn.lock
+# yarn.lock
+# pnpm-lock.yaml
