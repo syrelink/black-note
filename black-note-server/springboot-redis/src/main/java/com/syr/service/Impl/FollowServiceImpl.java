@@ -1,48 +1,74 @@
 package com.syr.service.Impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.syr.entity.Follow;
+import com.syr.entity.User;
 import com.syr.mapper.FollowMapper;
-import com.syr.service.IFollowService;
+import com.syr.service.FollowService;
+import com.syr.service.UserService;
 import com.syr.utils.UserHolder;
+import com.syr.vo.UserVO;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
-public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> implements IFollowService {
+@RequiredArgsConstructor
+public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> implements FollowService {
+
+    private final StringRedisTemplate redisTemplate;
+    private final UserService userService;
+
+    private static final String FOLLOW_KEY = "follow:";
 
     @Override
-    public void follow(Long followUserId, Boolean isFollow) {
-        Long userId = UserHolder.getUser().getId();
+    public void follow(Long targetUserId) {
+        Long currentUserId = UserHolder.getUserId();
+        String followKey = FOLLOW_KEY + currentUserId;
 
-        if (isFollow) {
-            Follow follow = new Follow();
-            follow.setFollowUserId(followUserId);
-            follow.setUserId(userId);
-            save(follow);
+        Boolean isFollow = redisTemplate.opsForSet().isMember(followKey, targetUserId.toString());
+
+        if (Boolean.TRUE.equals(isFollow)) {
+            lambdaUpdate()
+                    .eq(Follow::getUserId, currentUserId)
+                    .eq(Follow::getFollowUserId, targetUserId)
+                    .remove();
+            redisTemplate.opsForSet().remove(followKey, targetUserId.toString());
         } else {
-            remove(new QueryWrapper<Follow>()
-                    .eq("user_id", userId)
-                    .eq("follow_user_id", followUserId));
+            Follow follow = new Follow();
+            follow.setUserId(currentUserId);
+            follow.setFollowUserId(targetUserId);
+            save(follow);
+            redisTemplate.opsForSet().add(followKey, targetUserId.toString());
         }
     }
 
     @Override
-    public boolean isFollow(Long followUserId) {
-        Long userId = UserHolder.getUser().getId();
-        Long count = query().eq("user_id", userId).eq("follow_user_id", followUserId).count();
-        return count > 0;
+    public Boolean isFollow(Long targetUserId) {
+        Long currentUserId = UserHolder.getUserId();
+        return Boolean.TRUE.equals(
+                redisTemplate.opsForSet().isMember(FOLLOW_KEY + currentUserId, targetUserId.toString())
+        );
     }
 
     @Override
-    public List<Follow> queryFollows(Long id) {
-        List<Follow> follows = query().eq("user_id", id).list();
-        if (follows == null || follows.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return follows;
+    public List<UserVO> commonFollow(Long targetUserId) {
+        Long currentUserId = UserHolder.getUserId();
+        Set<String> commonIds = redisTemplate.opsForSet()
+                .intersect(FOLLOW_KEY + currentUserId, FOLLOW_KEY + targetUserId);
+
+        if (commonIds == null || commonIds.isEmpty()) return Collections.emptyList();
+
+        List<Long> idList = commonIds.stream().map(Long::valueOf).collect(Collectors.toList());
+        List<User> users = userService.listByIds(idList);
+
+        return users.stream().map(user -> {
+            UserVO vo = new UserVO();
+            BeanUtil.copyProperties(user, vo);
+            return vo;
+        }).collect(Collectors.toList());
     }
 }

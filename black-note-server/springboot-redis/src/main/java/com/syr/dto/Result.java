@@ -1,33 +1,38 @@
 package com.syr.dto;
-
-import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
-import java.util.List;
 
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class Result {
-    private Boolean success;
-    private String errorMsg;
-    private Object data;
-    private Long total;
 
-    public static Result ok() {
-        return new Result(true, null, null, null);
+public class Result<T> {
+    private Integer code;
+    private String message;
+    private T data;
+
+    // 成功
+    public static <T> Result<T> success(T data) {
+        Result<T> r = new Result<>();
+        r.code = 200;
+        r.message = "success";
+        r.data = data;
+        return r;
+    }
+    public static <T> Result<T> success() {
+        return success(null);
+    }
+    // 失败
+    public static <T> Result<T> fail(String message) {
+        Result<T> r = new Result<>();
+        r.code = 500;
+        r.message = message;
+        return r;
     }
 
-    public static Result ok(Object data) {
-        return new Result(true, null, data, null);
-    }
-
-    public static Result ok(List<?> data, Long total) {
-        return new Result(true, null, data, total);
-    }
-
-    public static Result fail(String errorMsg) {
-        return new Result(false, errorMsg, null, null);
+    // 自定义状态码
+    public static <T> Result<T> fail(Integer code, String message) {
+        Result<T> r = new Result<>();
+        r.code = code;
+        r.message = message;
+        return r;
     }
 }

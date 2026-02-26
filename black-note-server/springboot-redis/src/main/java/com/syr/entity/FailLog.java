@@ -1,24 +1,25 @@
 package com.syr.entity;
 
-
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("user")
-public class User {
+@TableName("fail_log")
+public class FailLog {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String username;
+    // 失败类型枚举值：CACHE_DELETE / LIKE_SYNC
+    private String type;
 
-    private String password;
+    private String content;
 
-    private String nickname;
+    private Integer retryCount;
 
-    private String avatar;
+    // 0=待处理 1=已处理
+    private Integer status;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

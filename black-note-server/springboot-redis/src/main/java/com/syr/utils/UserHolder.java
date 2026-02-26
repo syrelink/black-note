@@ -1,19 +1,19 @@
 package com.syr.utils;
 
-import com.syr.dto.UserDTO;
-
 public class UserHolder {
-    private static final ThreadLocal<UserDTO> tl = new ThreadLocal<>();
 
-    public static void saveUser(UserDTO user){
-        tl.set(user);
+    private static final ThreadLocal<Long> tl = new ThreadLocal<>();
+
+    public static void setUserId(Long id) {
+        tl.set(id);
     }
 
-    public static UserDTO getUser(){
+    public static Long getUserId() {
         return tl.get();
     }
 
-    public static void removeUser(){
+    // 请求结束后必须清除，防止内存泄漏
+    public static void remove() {
         tl.remove();
     }
 }
