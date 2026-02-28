@@ -1,0 +1,40 @@
+import { useState,  createContext, useContext } from 'react'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const [token,    setToken]   = useState(() => localStorage.getItem('token') || '')
+  const [userInfo, setUserInfo] = useState(() => {
+    const saved = localStorage.getItem('userInfo')
+    return saved ? JSON.parse(saved) : null  // 存完整用户对象
+  })
+
+  const login = (tk, info) => {  // info 是用户对象 {id, username, nickname, avatar}
+    setToken(tk)
+    setUserInfo(info)
+    localStorage.setItem('token', tk)
+    localStorage.setItem('userInfo', JSON.stringify(info))
+  }
+
+  const logout = () => {
+    setToken('')
+    setUserInfo(null)
+    localStorage.removeItem('token')
+    localStorage.removeItem('userInfo')
+  }
+
+  return (
+    <AuthContext.Provider value={{
+      token, userInfo, login, logout, isLogin: !!token,
+      // 便捷属性
+      username:  userInfo?.username  || '',
+      nickname:  userInfo?.nickname  || userInfo?.username || '',
+      avatar:    userInfo?.avatar    || null,
+      userId:    userInfo?.id        || null,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => useContext(AuthContext)

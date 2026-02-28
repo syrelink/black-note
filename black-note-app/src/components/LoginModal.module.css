@@ -1,0 +1,74 @@
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(20,18,16,.65);
+  z-index: 400;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+
+.modal {
+  background: var(--card);
+  width: 340px; max-width: 95vw;
+  padding: 2.5rem 2rem;
+  border: 1px solid var(--border);
+  animation: modalIn .25s ease;
+}
+
+.brand {
+  font-size: 1.4rem; font-weight: 700;
+  letter-spacing: .06em; text-align: center;
+  margin-bottom: .3rem;
+}
+.brand span { color: var(--accent); }
+
+.sub {
+  text-align: center; font-size: .78rem;
+  color: var(--muted); margin-bottom: 1.8rem;
+}
+
+.toggle {
+  display: flex; margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.toggleBtn {
+  flex: 1; background: none; border: none;
+  font-size: .82rem; color: var(--muted);
+  padding-bottom: .6rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all .2s; letter-spacing: .04em;
+}
+.toggleBtn:hover { color: var(--ink); }
+.toggleBtn.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.field { margin-bottom: .9rem; }
+.field label {
+  display: block; font-size: .75rem;
+  color: var(--muted); margin-bottom: .35rem;
+}
+.field input {
+  width: 100%; padding: .58rem .8rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  font-size: .84rem; color: var(--ink);
+  outline: none; transition: border-color .2s;
+}
+.field input:focus { border-color: var(--ink); }
+
+.msg {
+  font-size: .76rem; color: var(--accent);
+  margin-bottom: .8rem; text-align: center;
+}
+
+.submitBtn {
+  width: 100%; padding: .6rem;
+  background: var(--ink); color: var(--paper);
+  border: none; font-size: .84rem;
+  letter-spacing: .05em; margin-top: .4rem;
+  transition: opacity .2s;
+}
+.submitBtn:hover { opacity: .82; }
+.submitBtn:disabled { opacity: .5; }

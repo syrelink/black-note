@@ -20,7 +20,7 @@ public class NoteController {
     @PostMapping("/publish")
     public Result<Void> publish(@RequestBody @Valid NotePublishDTO dto) {
         noteService.publish(dto);
-        return Result.success(null);
+        return Result.success();
     }
 
     @GetMapping("/{id}")
@@ -28,12 +28,17 @@ public class NoteController {
         return Result.success(noteService.getNoteById(id));
     }
 
-    @DeleteMapping("/{id}")
+    @GetMapping("/delete/{id}")
     public Result<Void> deleteNote(@PathVariable Long id) {
         noteService.deleteNote(id);
-        return Result.success(null);
+        return Result.success();
     }
-
+    @GetMapping("/list")
+    public Result<List<NoteVO>> noteList(
+            @RequestParam(defaultValue = "1")  Integer page,
+            @RequestParam(defaultValue = "20") Integer size) {
+        return Result.success(noteService.noteList(page, size));
+    }
     @GetMapping("/list/{userId}")
     public Result<List<NoteVO>> listByUser(@PathVariable Long userId) {
         return Result.success(noteService.listByUser(userId));
@@ -48,5 +53,11 @@ public class NoteController {
     @GetMapping("/like/count/{noteId}")
     public Result<Long> getLikeCount(@PathVariable Long noteId) {
         return Result.success(noteService.getLikeCount(noteId));
+    }
+
+    @GetMapping("/like/status/{noteId}")
+    public Result<Boolean> isLiked(@PathVariable Long noteId) {
+        System.out.println("为什么*************");
+        return Result.success(noteService.isLiked(noteId));
     }
 }

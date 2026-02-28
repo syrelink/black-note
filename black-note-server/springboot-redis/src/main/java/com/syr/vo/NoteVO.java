@@ -10,7 +10,8 @@ public class NoteVO {
     private Long id;
 
     private Long userId;
-
+    private String nickname;
+    private String avatar;
     private String title;
 
     private String content;
@@ -18,7 +19,7 @@ public class NoteVO {
     private Integer likeCount;
 
     // 当前登录用户是否点赞了这篇笔记（从Redis Set判断后填入）
-    private Boolean isLiked;
+    private Boolean liked;
 
     // 作者信息（避免前端再发一次请求）
     private String authorName;

@@ -10,6 +10,7 @@ import com.syr.dto.RegisterDTO;
 import com.syr.entity.User;
 import com.syr.mapper.UserMapper;
 import com.syr.service.UserService;
+import com.syr.vo.LoginVO;
 import com.syr.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -32,18 +33,31 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         User user = new User();
         user.setUsername(dto.getUsername());
         user.setPassword(BCrypt.hashpw(dto.getPassword()));
+        user.setNickname("小黑子");  // 👈 默认昵称用用户名
+        user.setAvatar("http://localhost:9000/syr/434661c680244262b6cc4301e633dcdc.jpeg"); // 👈 默认头像
         save(user);
     }
 
-    @Override
-    public String login(LoginDTO dto) {
+    public LoginVO login(LoginDTO dto) {
         User user = lambdaQuery().eq(User::getUsername, dto.getUsername()).one();
         if (user == null || !BCrypt.checkpw(dto.getPassword(), user.getPassword())) {
             throw new BusinessException(400, "用户名或密码错误");
         }
+
         String token = UUID.randomUUID().toString(true);
-        redisTemplate.opsForValue().set(TOKEN_KEY + token, user.getId().toString(), TOKEN_TTL, TimeUnit.MINUTES);
-        return token;
+        redisTemplate.opsForValue().set(
+                TOKEN_KEY + token,
+                user.getId().toString(),
+                TOKEN_TTL, TimeUnit.MINUTES
+        );
+
+        LoginVO vo = new LoginVO();
+        vo.setToken(token);
+        vo.setId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setNickname(user.getNickname());
+        vo.setAvatar(user.getAvatar());
+        return vo;
     }
 
     @Override

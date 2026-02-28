@@ -1,0 +1,108 @@
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(20,18,16,.65);
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+
+.modal {
+  background: var(--card);
+  width: 520px; max-width: 95vw;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  animation: modalIn .25s ease;
+  max-height: 90vh; overflow-y: auto;
+}
+
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.header h2 { font-size: .95rem; font-weight: 700; letter-spacing: .05em; }
+
+.closeBtn {
+  background: none; border: none;
+  font-size: .85rem; color: var(--muted);
+  padding: .2rem .4rem;
+  transition: color .2s;
+}
+.closeBtn:hover { color: var(--ink); }
+
+.field { margin-bottom: 1rem; }
+.field label {
+  display: block; font-size: .76rem;
+  color: var(--muted); margin-bottom: .4rem;
+  letter-spacing: .03em;
+}
+.hint { font-size: .7rem; }
+
+.field input,
+.field textarea {
+  width: 100%; padding: .6rem .8rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  font-size: .84rem; color: var(--ink);
+  outline: none; resize: none;
+  transition: border-color .2s;
+}
+.field input:focus,
+.field textarea:focus { border-color: var(--ink); }
+
+.uploadArea {
+  display: block;
+  border: 1px dashed var(--border);
+  padding: 1rem;
+  text-align: center;
+  font-size: .8rem; color: var(--muted);
+  cursor: pointer; transition: all .2s;
+}
+.uploadArea:hover { border-color: var(--ink); color: var(--ink); }
+
+.uploading {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+.preview {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+  margin-top: .6rem;
+}
+.previewItem {
+  position: relative; width: 72px; height: 72px;
+}
+.previewItem img {
+  width: 100%; height: 100%; object-fit: cover;
+  border: 1px solid var(--border);
+}
+.previewItem button {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px;
+  background: var(--ink); color: white;
+  border: none; border-radius: 50%;
+  font-size: .6rem;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.msg { font-size: .78rem; color: var(--accent); margin-bottom: .8rem; }
+
+.actions {
+  display: flex; gap: .8rem; justify-content: flex-end;
+  margin-top: 1.2rem;
+}
+.btnCancel {
+  padding: .45rem 1.2rem;
+  border: 1px solid var(--border);
+  background: transparent; font-size: .8rem;
+  transition: all .2s;
+}
+.btnCancel:hover { border-color: var(--ink); }
+
+.btnSubmit {
+  padding: .45rem 1.5rem;
+  border: none; background: var(--accent);
+  color: white; font-size: .8rem;
+  transition: opacity .2s;
+}
+.btnSubmit:hover { opacity: .85; }
+.btnSubmit:disabled { opacity: .5; }

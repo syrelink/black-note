@@ -1,0 +1,64 @@
+.main {
+  margin-top: calc(var(--nav-h) + var(--search-h));
+  padding: 1.5rem 2rem;
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 下拉刷新指示器 */
+.pullIndicator {
+  position: fixed;
+  top: calc(var(--nav-h) + var(--search-h));
+  left: 50%;
+  transform: translateX(-50%) translateY(-40px);
+  z-index: 98;
+  display: flex; align-items: center; gap: .5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: .4rem 1rem;
+  font-size: .75rem; color: var(--muted);
+  pointer-events: none;
+  box-shadow: 0 2px 12px rgba(0,0,0,.06);
+}
+
+.refreshSpinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* 底部加载状态 */
+.bottomLoading {
+  display: flex; align-items: center; justify-content: center;
+  gap: .6rem; padding: 2rem;
+  color: var(--muted); font-size: .8rem;
+}
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* 到底提示 */
+.noMore {
+  text-align: center;
+  padding: 2rem;
+  font-size: .75rem;
+  color: var(--border);
+  letter-spacing: .1em;
+}
+
+/* 空状态 */
+.empty {
+  text-align: center;
+  padding: 5rem 0;
+  color: var(--muted);
+}
+.emptyIcon { font-size: 2.5rem; margin-bottom: 1rem; }
+.empty p { font-size: .86rem; }

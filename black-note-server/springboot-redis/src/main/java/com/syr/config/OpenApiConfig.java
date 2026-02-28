@@ -14,9 +14,9 @@ public class OpenApiConfig {
     public OpenAPI springShopOpenAPI() {
         return new OpenAPI()
                 .info(new Info().title("小黑书 API")
-                        .description("基于 Spring Boot 3 + Redis 的高性能图文博客后端")
+                        .description("基于 Spring Boot 3 + Redis 的图文笔记平台")
                         .version("v1.0.0")
-                        .contact(new Contact().name("syr").email("your-email@example.com")))
+                        .contact(new Contact().name("syr").email("syrlinkstart@gmail.com")))
                 .externalDocs(new ExternalDocumentation()
                         .description("项目 GitHub 地址")
                         .url("https://github.com/syrelink/JavaProject-mysite"));
