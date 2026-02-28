@@ -74,3 +74,81 @@
   transition: opacity .2s;
 }
 .btnPrimary:hover { opacity: .85; }
+
+/* ── 桌面端 Tab ── */
+.desktopTabs {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  z-index: 101;
+}
+
+.tab {
+  background: none;
+  border: none;
+  font-size: .82rem;
+  color: var(--muted);
+  letter-spacing: .05em;
+  padding-bottom: 3px;
+  border-bottom: 2px solid transparent;
+  transition: color .2s, border-color .2s;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* ── 手机底部 Tab 栏 ── */
+.bottomBar { display: none; }
+
+@media (max-width: 640px) {
+  .desktopTabs { display: none; }
+  .nickname    { display: none; }
+  .btnSecondary { display: none; }
+
+  .btnPrimary {
+    padding: .35rem .8rem;
+    font-size: .75rem;
+  }
+
+  .bottomBar {
+    display: flex;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 56px;
+    background: var(--paper);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    align-items: center;
+    justify-content: space-around;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .bottomTab {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 2px;
+    background: none; border: none;
+    cursor: pointer; padding: .4rem 0;
+    color: var(--muted); transition: color .2s;
+  }
+  .bottomTab.bottomActive { color: var(--accent); }
+
+  .bottomIcon  { font-size: 1.2rem; line-height: 1; }
+  .bottomLabel { font-size: .62rem; letter-spacing: .03em; }
+
+  .bottomPublish {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: var(--accent); color: white;
+    border: none; font-size: 1.4rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15);
+    transition: opacity .2s; flex-shrink: 0;
+  }
+  .bottomPublish:hover { opacity: .85; }
+}
