@@ -10,17 +10,6 @@ import PublishModal from '../components/PublishModal'
 import LoginModal from '../components/LoginModal'
 import styles from './Home.module.css'
 
-const MOCK = [
-  { id:1, title:'清晨的第一杯手冲', content:'坐在窗边，看着晨光一点点铺开，咖啡的香气慢慢弥散，这是一天中最好的时刻。', likeCount:128, authorName:'咖啡爱好者' },
-  { id:2, title:'东京雨天街拍记录', content:'用胶片记录涩谷路口雨后的人群，每一把伞都是一个故事，城市有自己的节奏。', likeCount:342, authorName:'旅行摄影师' },
-  { id:3, title:'深夜读完了这本书', content:'《百年孤独》终于读完，马尔克斯构建的马孔多让人沉迷，结尾让我沉默了很久。', likeCount:215, authorName:'书虫小鱼' },
-  { id:4, title:'自制抹茶蛋糕第三次尝试', content:'这次终于没有塌陷！关键是蛋白打发程度和烤箱温度，记录一下配方以防忘记。', likeCount:89, authorName:'烘焙新手' },
-  { id:5, title:'骑行川藏线第14天', content:'今日海拔4800米，风很大，视野极好。远处的雪山在云间若隐若现，值得所有的疲惫。', likeCount:567, authorName:'骑行者老陈' },
-  { id:6, title:'Redis缓存设计实战', content:'记录一次高并发场景下的缓存优化，从穿透到击穿，踩了不少坑，整理成文章。', likeCount:43, authorName:'后端程序员' },
-  { id:7, title:'北京初雪', content:'今年第一场雪来得迟，清晨推开窗，白茫茫一片，胡同里安静得很，像是城市按了暂停键。', likeCount:198, authorName:'北漂小张' },
-  { id:8, title:'30天冥想打卡完成', content:'从最初的坐立不安到现在能静坐20分钟，这一个月专注力明显提升，推荐给大家。', likeCount:76, authorName:'慢生活倡导者' },
-]
-
 export default function Home() {
   const { isLogin , userId: myId}  = useAuth()
   const navigate     = useNavigate()

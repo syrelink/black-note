@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import MDEditor from '@uiw/react-md-editor'
+import ConfirmModal from './ConfirmModal'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { noteApi } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import styles from './NoteDetail.module.css'
 
 export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }) {
-  const { isLogin, userId } = useAuth()
+  const { isLogin, userInfo } = useAuth()
   const navigate = useNavigate()
 
   const liked = likeMap?.[note?.id]?.liked ?? !!note?.isLiked
@@ -14,11 +19,12 @@ export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }
   const [detail,   setDetail]   = useState(note)
   const [imgIndex, setImgIndex] = useState(0)
   const [deleting, setDeleting] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false) 
 
   const touchStartX = useRef(0)
   const touchEndX   = useRef(0)
 
-  const isAuthor = userId && detail?.userId && String(userId) === String(detail.userId)
+  const isAuthor = userInfo?.id && detail?.userId && String(userInfo.id) === String(detail.userId)
 
   useEffect(() => {
     if (!note) return
@@ -55,13 +61,19 @@ export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }
     navigate(`/note/edit/${note.id}`)
   }
 
-  const handleDelete = async () => {
-    if (!window.confirm('确认删除这篇笔记？')) return
+  // 点删除按钮：只弹出自定义确认框
+  const handleDelete = () => {
+    setShowConfirm(true)
+  }
+
+  // 用户点确认：真正执行删除
+  const handleConfirmDelete = async () => {
     setDeleting(true)
     try {
       await noteApi.deleteNote(note.id)
-      onClose()
-      onDeleted?.()
+      setShowConfirm(false)
+      onClose()           // 关闭详情弹窗
+      onDeleted?.(note.id) // 通知父组件删除这条笔记
     } catch {
       alert('删除失败，请重试')
     } finally {
@@ -105,10 +117,9 @@ export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }
           </div>
         )}
 
-        {/* 右侧内容：没有图片时撑满全宽 */}
+        {/* 右侧内容 */}
         <div className={`${styles.right} ${!hasImg ? styles.rightFull : ''}`}>
 
-          {/* 关闭按钮绝对定位右上角 */}
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
 
           {/* 作者信息 */}
@@ -127,12 +138,16 @@ export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }
 
           <h2 className={styles.title}>{detail?.title}</h2>
 
-          <div
-            className={styles.content}
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(detail?.content || '') }}
-          />
+          {/* MDEditor 渲染 Markdown */}
+          <div className={styles.content} data-color-mode="light">
+            <MDEditor.Markdown
+              source={detail?.content || ''}
+              remarkPlugins={[remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+            />
+          </div>
 
-          {/* 底部操作栏：点赞左，编辑/删除右 */}
+          {/* 底部操作栏 */}
           <div className={styles.actions}>
             <button
               className={`${styles.likeBtn} ${liked ? styles.liked : ''}`}
@@ -153,21 +168,17 @@ export default function NoteDetail({ note, onClose, onLike, likeMap, onDeleted }
 
         </div>
       </div>
+
+      {showConfirm && (
+        <ConfirmModal
+          title="删除笔记"
+          message="确认删除这篇笔记？删除后无法恢复。"
+          loading={deleting}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+
     </div>
   )
-}
-
-function renderMarkdown(text) {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^## (.+)$/gm,    '<h2>$1</h2>')
-    .replace(/^### (.+)$/gm,   '<h3>$1</h3>')
-    .replace(/^# (.+)$/gm,     '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,     '<em>$1</em>')
-    .replace(/`(.+?)`/g,       '<code>$1</code>')
-    .replace(/^- (.+)$/gm,     '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank">$1</a>')
-    .replace(/\n/g, '<br/>')
 }

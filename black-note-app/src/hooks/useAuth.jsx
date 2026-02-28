@@ -6,7 +6,7 @@ export function AuthProvider({ children }) {
   const [token,    setToken]   = useState(() => localStorage.getItem('token') || '')
   const [userInfo, setUserInfo] = useState(() => {
     const saved = localStorage.getItem('userInfo')
-    return saved ? JSON.parse(saved) : null  // 存完整用户对象
+    return saved ? JSON.parse(saved) : null  
   })
 
   const updateUser = (patch) => {
@@ -17,7 +17,7 @@ export function AuthProvider({ children }) {
     })
   }
 
-  const login = (tk, info) => {  // info 是用户对象 {id, username, nickname, avatar}
+  const login = (tk, info) => { 
     setToken(tk)
     setUserInfo(info)
     localStorage.setItem('token', tk)
@@ -36,7 +36,7 @@ export function AuthProvider({ children }) {
       token, userInfo, login, logout, updateUser, isLogin: !!token,
       // 便捷属性
       username:  userInfo?.username  || '',
-      nickname:  userInfo?.nickname  || userInfo?.username || '',
+      nickname:  userInfo?.nickname  || '',
       avatar:    userInfo?.avatar    || null,
       userId:    userInfo?.id        || null,
     }}>

@@ -1,221 +1,394 @@
-/* 页面整体 */
+/* ── 字体引入 ── */
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── 页面整体 ── */
 .page {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 2rem;
-    min-height: 100vh;
-    background: var(--paper);
+  min-height: 100vh;
+  background: #faf9f7;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 顶部栏 ── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2.5rem;
+  height: 52px;
+  background: rgba(250, 249, 247, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #e8e4de;
+}
+
+.back {
+  background: none;
+  border: none;
+  font-size: .82rem;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  transition: color .2s;
+  letter-spacing: .02em;
+  min-width: 80px;
+}
+.back:hover { color: #333; }
+
+/* ── 模式切换 ── */
+.modeSwitch {
+  display: flex;
+  align-items: center;
+  background: #f0ede8;
+  border-radius: 6px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.modeBtn {
+  background: none;
+  border: none;
+  padding: .3rem .75rem;
+  font-size: .75rem;
+  color: #999;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .15s;
+  font-family: inherit;
+  letter-spacing: .03em;
+}
+.modeBtn:hover { color: #555; }
+.modeActive {
+  background: #fff;
+  color: #333 !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+/* ── 保存按钮 ── */
+.btnSave {
+  min-width: 80px;
+  padding: .38rem 1.2rem;
+  border: none;
+  background: #c0392b;
+  color: white;
+  font-size: .78rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .2s;
+  font-family: inherit;
+}
+.btnSave:hover { background: #a93226; }
+.btnSave:disabled { opacity: .6; cursor: not-allowed; }
+.btnSaved {
+  background: #27ae60 !important;
+}
+
+/* ── 正文区域 ── */
+.body {
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2.5rem 5rem 6rem;
+  flex: 1;
+}
+
+/* ── 标题输入 ── */
+.titleInput {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: 'Lora', 'Noto Serif SC', 'SimSun', Georgia, serif;
+  font-size: 2rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  outline: none;
+  line-height: 1.3;
+  padding: 0;
+  letter-spacing: .01em;
+  box-sizing: border-box;
+}
+.titleInput::placeholder { color: #ccc; }
+
+/* ── 分割线 ── */
+.divider {
+  height: 1px;
+  background: #e8e4de;
+  margin: 1.5rem 0;
+}
+
+/* ── 编辑器容器 ── */
+.editorWrap {
+  width: 100%;
+}
+
+/* 单栏编辑模式 */
+.mode_edit .editPane,
+.mode_preview .previewPane {
+  width: 100%;
+}
+
+/* 分栏模式 */
+.mode_split {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  gap: 0;
+  min-height: 480px;
+}
+.mode_split .editPane,
+.mode_split .previewPane {
+  min-height: 480px;
+  overflow-y: auto;
+}
+.mode_split .editPane {
+  padding-right: 2rem;
+}
+.mode_split .previewPane {
+  padding-left: 2rem;
+}
+
+/* ── 分割线 ── */
+.splitLine {
+  width: 1px;
+  background: #e8e4de;
+  min-height: 480px;
+}
+
+/* ── 编辑器 textarea ── */
+.editor {
+  width: 100%;
+  min-height: 480px;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+
+  font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+  font-size: .92rem;
+  line-height: 1.6;
+  color: #2c2c2c;
+  letter-spacing: .01em;
+
+  padding: 0;
+  box-sizing: border-box;
+  caret-color: #c0392b;
+}
+.editor::placeholder {
+  color: #ccc;
+  font-style: italic;
+}
+
+/* ── 预览区 ── */
+.previewPane {
+  font-family: 'Lora', 'Noto Serif SC', 'SimSun', Georgia, serif;
+  font-size: .95rem;
+  line-height: 1.7;
+  color: #2c2c2c;
+  min-height: 480px;
+}
+
+/* 预览内的 Markdown 样式 */
+.previewPane h1 {
+  font-size: 1.7rem;
+  font-weight: 600;
+  margin: 1.5rem 0 .6rem;
+  color: #1a1a1a;
+  border-bottom: 1px solid #e8e4de;
+  padding-bottom: .4rem;
+}
+.previewPane h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 1.3rem 0 .5rem;
+  color: #1a1a1a;
+}
+.previewPane h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 1rem 0 .4rem;
+  color: #333;
+}
+.previewPane p {
+  margin: 0 0 .4rem;
+}
+.previewPane strong { color: #1a1a1a; }
+.previewPane em { font-style: italic; color: #555; }
+.previewPane code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .82rem;
+  background: #f0ede8;
+  padding: .15rem .4rem;
+  border-radius: 3px;
+  color: #c0392b;
+}
+.previewPane pre {
+  background: #f7f5f2;
+  border: 1px solid #e8e4de;
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.previewPane pre code {
+  background: none;
+  padding: 0;
+  color: #2c2c2c;
+}
+.previewPane blockquote {
+  border-left: 3px solid #c0392b;
+  margin: 1rem 0;
+  padding: .3rem 0 .3rem 1rem;
+  color: #777;
+  font-style: italic;
+}
+.previewPane ul, .previewPane ol {
+  padding-left: 1.5rem;
+  margin: .5rem 0 1rem;
+}
+.previewPane li { margin-bottom: .3rem; }
+.previewPane a { color: #c0392b; text-decoration: underline; }
+.previewPane hr {
+  border: none;
+  border-top: 1px solid #e8e4de;
+  margin: 1.5rem 0;
+}
+.previewPane img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+/* ── 图片区域 ── */
+.imageSection {
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid #e8e4de;
+}
+
+.imageSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: 1rem;
+  font-size: .82rem;
+  color: #555;
+  letter-spacing: .03em;
+}
+
+.imageHint {
+  color: #bbb;
+  font-size: .74rem;
+}
+
+.uploadArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed #d8d4ce;
+  border-radius: 8px;
+  padding: 1.2rem;
+  cursor: pointer;
+  transition: all .2s;
+  background: #fdfcfa;
+}
+.uploadArea:hover {
+  border-color: #c0392b;
+  background: #fef9f9;
+}
+
+.uploadText {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .82rem;
+  color: #aaa;
+}
+.uploadIcon {
+  font-size: 1.1rem;
+  color: #ccc;
+}
+.uploadingText {
+  font-size: .82rem;
+  color: #aaa;
+}
+
+.imageGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-top: .75rem;
+}
+
+.imageItem {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  border-radius: 6px;
+  overflow: visible;
+}
+.imageItem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e8e4de;
+}
+.imageRemove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
+  background: #555;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: .6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .15s;
+}
+.imageRemove:hover { background: #c0392b; }
+
+/* ── 提示信息 ── */
+.msg {
+  margin-top: 1rem;
+  font-size: .8rem;
+  color: #c0392b;
+}
+
+/* ── 加载状态 ── */
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid #e8e4de;
+  border-top-color: #c0392b;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 响应式 ── */
+@media (max-width: 640px) {
+  .header { padding: 0 1rem; }
+  .body { padding: 2rem 1.2rem 5rem; }
+  .titleInput { font-size: 1.5rem; }
+  .modeSwitch { display: none; }
+  .mode_split {
+    grid-template-columns: 1fr;
   }
-  
-  /* 顶部导航栏 */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .header h2 {
-    font-size: .95rem;
-    font-weight: 700;
-    letter-spacing: .05em;
-  }
-  
-  .back {
-    background: none;
-    border: none;
-    font-size: .82rem;
-    color: var(--muted);
-    cursor: pointer;
-    padding: 0;
-    transition: color .2s;
-  }
-  .back:hover { color: var(--ink); }
-  
-  /* 字段 */
-  .field { margin-bottom: 1.2rem; }
-  .field label {
-    display: block;
-    font-size: .76rem;
-    color: var(--muted);
-    margin-bottom: .4rem;
-    letter-spacing: .03em;
-  }
-  .hint { font-size: .7rem; }
-  
-  .field input {
-    width: 100%;
-    padding: .6rem .8rem;
-    border: 1px solid var(--border);
-    background: var(--card);
-    font-size: .84rem;
-    color: var(--ink);
-    outline: none;
-    transition: border-color .2s;
-  }
-  .field input:focus { border-color: var(--ink); }
-  
-  /* Markdown 编辑器 */
-  .editorHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: .4rem;
-  }
-  
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: .2rem;
-  }
-  .toolbar button {
-    background: none;
-    border: 1px solid transparent;
-    padding: .2rem .5rem;
-    font-size: .78rem;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all .15s;
-    border-radius: 3px;
-  }
-  .toolbar button:hover {
-    border-color: var(--border);
-    color: var(--ink);
-  }
-  .activeTab {
-    border-color: var(--ink) !important;
-    color: var(--ink) !important;
-    background: var(--paper) !important;
-  }
-  .sep {
-    width: 1px;
-    height: 14px;
-    background: var(--border);
-    margin: 0 .3rem;
-  }
-  
-  .mdEditor {
-    width: 100%;
-    padding: .8rem;
-    border: 1px solid var(--border);
-    background: var(--card);
-    font-size: .84rem;
-    color: var(--ink);
-    outline: none;
-    resize: vertical;
-    font-family: 'DM Mono', monospace;
-    line-height: 1.7;
-    transition: border-color .2s;
-    min-height: 320px;
-  }
-  .mdEditor:focus { border-color: var(--ink); }
-  
-  .mdPreview {
-    width: 100%;
-    min-height: 320px;
-    padding: .8rem;
-    border: 1px solid var(--border);
-    background: var(--card);
-    font-size: .84rem;
-    color: var(--ink);
-    line-height: 1.8;
-  }
-  .mdPreview h1 { font-size: 1.4rem; margin: .8rem 0 .4rem; }
-  .mdPreview h2 { font-size: 1.15rem; margin: .7rem 0 .3rem; }
-  .mdPreview h3 { font-size: 1rem; margin: .6rem 0 .3rem; }
-  .mdPreview code {
-    background: var(--border);
-    padding: .1rem .4rem;
-    font-family: 'DM Mono', monospace;
-    font-size: .8rem;
-  }
-  .mdPreview ul { padding-left: 1.2rem; }
-  .mdPreview a { color: var(--accent); text-decoration: underline; }
-  
-  /* 图片上传 */
-  .uploadArea {
-    display: block;
-    border: 1px dashed var(--border);
-    padding: 1rem;
-    text-align: center;
-    font-size: .8rem;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all .2s;
-  }
-  .uploadArea:hover { border-color: var(--ink); color: var(--ink); }
-  
-  .preview {
-    display: flex;
-    gap: .5rem;
-    flex-wrap: wrap;
-    margin-top: .6rem;
-  }
-  .previewItem {
-    position: relative;
-    width: 72px;
-    height: 72px;
-  }
-  .previewItem img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border: 1px solid var(--border);
-  }
-  .previewItem button {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 18px;
-    height: 18px;
-    background: var(--ink);
-    color: white;
-    border: none;
-    border-radius: 50%;
-    font-size: .6rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-  
-  /* 提示信息 */
-  .msg {
-    font-size: .78rem;
-    color: var(--accent);
-    margin-bottom: .8rem;
-  }
-  
-  /* 保存按钮 */
-  .btnSubmit {
-    padding: .45rem 1.5rem;
-    border: none;
-    background: var(--accent);
-    color: white;
-    font-size: .8rem;
-    cursor: pointer;
-    transition: opacity .2s;
-  }
-  .btnSubmit:hover { opacity: .85; }
-  .btnSubmit:disabled { opacity: .5; cursor: not-allowed; }
-  
-  /* 加载状态 */
-  .loading {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 60vh;
-  }
-  .spinner {
-    width: 28px;
-    height: 28px;
-    border: 2px solid var(--border);
-    border-top-color: var(--ink);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-  
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
+  .splitLine { display: none; }
+  .mode_split .previewPane { display: none; }
+  .mode_split .editPane { padding-right: 0; }
+}
