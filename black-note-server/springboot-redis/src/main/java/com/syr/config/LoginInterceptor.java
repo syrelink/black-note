@@ -1,10 +1,9 @@
 package com.syr.config;
 
 
+import com.syr.exception.BusinessException;
 import com.syr.utils.UserHolder;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
+
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -19,8 +18,7 @@ public class LoginInterceptor implements HandlerInterceptor {
                              HttpServletResponse response,
                              Object handler) throws Exception {
         if (UserHolder.getUserId() == null) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);  // 返回401
-            return false;
+            throw new BusinessException(401, "未登录，请先登录");
         }
         return true;
     }

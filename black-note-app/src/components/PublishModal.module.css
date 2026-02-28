@@ -6,30 +6,34 @@
   backdrop-filter: blur(5px);
 }
 
+/* 弹窗加宽，不允许点遮罩关闭（JS里去掉onClick即可） */
 .modal {
   background: var(--card);
-  width: 520px; max-width: 95vw;
-  padding: 2rem;
+  width: 680px; max-width: 96vw;
+  padding: 2.2rem 2.4rem;
   border: 1px solid var(--border);
   animation: modalIn .25s ease;
-  max-height: 90vh; overflow-y: auto;
+  max-height: 92vh; overflow-y: auto;
 }
 
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.6rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
 .header h2 { font-size: .95rem; font-weight: 700; letter-spacing: .05em; }
 
 .closeBtn {
-  background: none; border: none;
-  font-size: .85rem; color: var(--muted);
-  padding: .2rem .4rem;
-  transition: color .2s;
+  width: 28px; height: 28px;
+  background: transparent; border: 1px solid var(--border);
+  font-size: .82rem; color: var(--muted);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .2s;
 }
-.closeBtn:hover { color: var(--ink); }
+.closeBtn:hover { border-color: var(--ink); color: var(--ink); }
 
-.field { margin-bottom: 1rem; }
+.field { margin-bottom: 1.2rem; }
 .field label {
   display: block; font-size: .76rem;
   color: var(--muted); margin-bottom: .4rem;
@@ -37,18 +41,87 @@
 }
 .hint { font-size: .7rem; }
 
-.field input,
-.field textarea {
-  width: 100%; padding: .6rem .8rem;
+.field input {
+  width: 100%; padding: .65rem .9rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  font-size: .88rem; color: var(--ink);
+  outline: none;
+  transition: border-color .2s;
+}
+.field input:focus { border-color: var(--ink); }
+
+/* Markdown 编辑器区域 */
+.editorHeader {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: .4rem;
+}
+
+.toolbar {
+  display: flex; align-items: center; gap: .25rem;
+}
+
+/* 工具栏按钮：简洁文字风格 */
+.toolbar button {
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: .2rem .55rem;
+  font-size: .76rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all .15s;
+  line-height: 1.4;
+  min-width: 28px;
+  text-align: center;
+}
+.toolbar button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.activeTab {
+  background: var(--ink) !important;
+  color: var(--card) !important;
+  border-color: var(--ink) !important;
+}
+.sep {
+  width: 1px; height: 14px;
+  background: var(--border);
+  margin: 0 .25rem;
+}
+
+.mdEditor {
+  width: 100%; padding: .8rem;
   border: 1px solid var(--border);
   background: var(--paper);
   font-size: .84rem; color: var(--ink);
   outline: none; resize: none;
+  font-family: 'DM Mono', monospace;
+  line-height: 1.7;
   transition: border-color .2s;
 }
-.field input:focus,
-.field textarea:focus { border-color: var(--ink); }
+.mdEditor:focus { border-color: var(--ink); }
 
+.mdPreview {
+  width: 100%; min-height: 200px;
+  padding: .8rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  font-size: .84rem; color: var(--ink);
+  line-height: 1.8;
+}
+.mdPreview h1 { font-size: 1.3rem; margin: .5rem 0 .3rem; }
+.mdPreview h2 { font-size: 1.1rem; margin: .5rem 0 .3rem; }
+.mdPreview h3 { font-size: .95rem; margin: .4rem 0 .3rem; }
+.mdPreview code {
+  background: var(--border);
+  padding: .1rem .35rem;
+  font-family: 'DM Mono', monospace;
+  font-size: .78rem;
+}
+.mdPreview ul { padding-left: 1.2rem; }
+.mdPreview a  { color: var(--accent); text-decoration: underline; }
+
+/* 图片上传 */
 .uploadArea {
   display: block;
   border: 1px dashed var(--border);
@@ -59,10 +132,7 @@
 }
 .uploadArea:hover { border-color: var(--ink); color: var(--ink); }
 
-.uploading {
-  display: inline-block;
-  animation: spin 1s linear infinite;
-}
+.uploading { opacity: .6; }
 
 .preview {
   display: flex; gap: .5rem; flex-wrap: wrap;
@@ -80,7 +150,7 @@
   width: 18px; height: 18px;
   background: var(--ink); color: white;
   border: none; border-radius: 50%;
-  font-size: .6rem;
+  font-size: .6rem; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
 
@@ -88,21 +158,23 @@
 
 .actions {
   display: flex; gap: .8rem; justify-content: flex-end;
-  margin-top: 1.2rem;
+  margin-top: 1.4rem; padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
 }
+
 .btnCancel {
-  padding: .45rem 1.2rem;
+  padding: .45rem 1.4rem;
   border: 1px solid var(--border);
   background: transparent; font-size: .8rem;
-  transition: all .2s;
+  cursor: pointer; transition: all .2s;
 }
 .btnCancel:hover { border-color: var(--ink); }
 
 .btnSubmit {
-  padding: .45rem 1.5rem;
+  padding: .45rem 1.8rem;
   border: none; background: var(--accent);
   color: white; font-size: .8rem;
-  transition: opacity .2s;
+  cursor: pointer; transition: opacity .2s;
 }
 .btnSubmit:hover { opacity: .85; }
-.btnSubmit:disabled { opacity: .5; }
+.btnSubmit:disabled { opacity: .5; cursor: not-allowed; }

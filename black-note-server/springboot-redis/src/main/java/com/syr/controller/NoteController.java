@@ -27,7 +27,11 @@ public class NoteController {
     public Result<NoteVO> getNoteById(@PathVariable Long id) {
         return Result.success(noteService.getNoteById(id));
     }
-
+    @PutMapping("/update/{id}")
+    public Result<Void> updateNote(@PathVariable Long id, @RequestBody @Valid NotePublishDTO dto) {
+        noteService.updateNote(id, dto);
+        return Result.success();
+    }
     @GetMapping("/delete/{id}")
     public Result<Void> deleteNote(@PathVariable Long id) {
         noteService.deleteNote(id);
@@ -47,7 +51,7 @@ public class NoteController {
     @PostMapping("/like/{noteId}")
     public Result<Void> like(@PathVariable Long noteId) {
         noteService.like(noteId);
-        return Result.success(null);
+        return Result.success();
     }
 
     @GetMapping("/like/count/{noteId}")
@@ -57,7 +61,6 @@ public class NoteController {
 
     @GetMapping("/like/status/{noteId}")
     public Result<Boolean> isLiked(@PathVariable Long noteId) {
-        System.out.println("为什么*************");
         return Result.success(noteService.isLiked(noteId));
     }
 }

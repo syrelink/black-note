@@ -19,7 +19,10 @@ public class FollowController {
         followService.follow(userId);
         return Result.success();
     }
-
+    @GetMapping("/list/{userId}")
+    public Result<List<UserVO>> followList(@PathVariable Long userId) {
+        return Result.success(followService.followList(userId));
+    }
     @GetMapping("/isFollow/{userId}")
     public Result<Boolean> isFollow(@PathVariable Long userId) {
         return Result.success(followService.isFollow(userId));

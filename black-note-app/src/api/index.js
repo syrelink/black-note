@@ -34,13 +34,14 @@ export const userApi = {
   register: (data) => http.post('/user/register', data),
   login:    (data) => http.post('/user/login', data),
   getById:  (id)   => http.get(`/user/${id}`),
-  getMe:    ()     => http.get('/user/me')
+  updateMe: (data) => http.put('/user/me', data),
 }
 
 // ── 笔记接口 ──
 export const noteApi = {
   publish:      (data)   => http.post('/note/publish', data),
   getById:    (id) => http.get(`/note/${id}`),
+  updateNote:   (id, data) => http.put(`/note/update/${id}`, data), 
   deleteNote: (id) => http.get(`/note/delete/${id}`),
   listByUser:   (userId) => http.get(`/note/list/${userId}`),
   like:         (noteId) => http.post(`/note/like/${noteId}`),
@@ -54,6 +55,7 @@ export const followApi = {
   follow:       (userId) => http.post(`/follow/${userId}`),
   isFollow:     (userId) => http.get(`/follow/isFollow/${userId}`),
   commonFollow: (userId) => http.get(`/follow/common/${userId}`),
+  followList: (userId) => http.get(`/follow/list/${userId}`),
 }
 
 // ── Feed接口 ──

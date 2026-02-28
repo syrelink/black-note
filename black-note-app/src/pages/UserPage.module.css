@@ -100,3 +100,107 @@
   border: 1px solid var(--border); background: transparent;
   cursor: pointer; font-size: .82rem;
 }
+/* 编辑资料按钮 */
+.editProfileBtn {
+  padding: .45rem 1.4rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  font-size: .82rem; color: var(--muted);
+  cursor: pointer; transition: all .2s;
+}
+.editProfileBtn:hover { border-color: var(--ink); color: var(--ink); }
+
+/* 编辑弹窗遮罩 */
+.editOverlay {
+  position: fixed; inset: 0;
+  background: rgba(20,18,16,.65);
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+
+.editModal {
+  background: var(--card);
+  width: 420px; max-width: 95vw;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  animation: modalIn .25s ease;
+}
+
+.editHeader {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.6rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.editHeader h2 { font-size: .95rem; font-weight: 700; letter-spacing: .05em; }
+
+.editClose {
+  width: 28px; height: 28px;
+  background: transparent; border: none;
+  font-size: .82rem; color: var(--muted);
+  cursor: pointer; transition: color .2s;
+  display: flex; align-items: center; justify-content: center;
+}
+.editClose:hover { color: var(--ink); }
+
+/* 头像预览行 */
+.editAvatarRow {
+  display: flex; align-items: center; gap: 1.2rem;
+  margin-bottom: 1.4rem;
+}
+
+.editAvatarPreview {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.editAvatarPreview img { width: 100%; height: 100%; object-fit: cover; }
+.editAvatarPreview span { font-size: 1.4rem; font-weight: 700; color: var(--muted); }
+
+.uploadAvatarBtn {
+  padding: .4rem 1rem;
+  border: 1px solid var(--border);
+  font-size: .78rem; color: var(--muted);
+  cursor: pointer; transition: all .2s;
+}
+.uploadAvatarBtn:hover { border-color: var(--ink); color: var(--ink); }
+
+/* 字段 */
+.editField { margin-bottom: 1.2rem; }
+.editField label {
+  display: block; font-size: .76rem;
+  color: var(--muted); margin-bottom: .4rem;
+}
+.editField input {
+  width: 100%; padding: .6rem .8rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  font-size: .84rem; color: var(--ink);
+  outline: none; transition: border-color .2s;
+}
+.editField input:focus { border-color: var(--ink); }
+
+.editMsg { font-size: .78rem; color: var(--accent); margin-bottom: .8rem; }
+
+.editActions {
+  display: flex; gap: .8rem; justify-content: flex-end;
+  margin-top: 1.4rem; padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+}
+.editCancel {
+  padding: .45rem 1.2rem;
+  border: 1px solid var(--border);
+  background: transparent; font-size: .8rem;
+  cursor: pointer; transition: all .2s;
+}
+.editCancel:hover { border-color: var(--ink); }
+.editSave {
+  padding: .45rem 1.5rem;
+  border: none; background: var(--accent);
+  color: white; font-size: .8rem;
+  cursor: pointer; transition: opacity .2s;
+}
+.editSave:hover { opacity: .85; }
+.editSave:disabled { opacity: .5; cursor: not-allowed; }

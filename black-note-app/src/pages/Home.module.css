@@ -62,3 +62,53 @@
 }
 .emptyIcon { font-size: 2.5rem; margin-bottom: 1rem; }
 .empty p { font-size: .86rem; }
+/* 关注列表 */
+.followList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.followItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  cursor: pointer;
+  background: var(--card);
+  border: 1px solid var(--border);
+  transition: background .15s;
+}
+
+.followItem:hover {
+  background: var(--bg, #f7f7f7);
+}
+
+.followAvatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.followAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.followName {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}

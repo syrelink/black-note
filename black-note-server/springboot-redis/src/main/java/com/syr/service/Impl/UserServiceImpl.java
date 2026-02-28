@@ -4,12 +4,14 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.syr.dto.UserUpdateDTO;
 import com.syr.exception.BusinessException;
 import com.syr.dto.LoginDTO;
 import com.syr.dto.RegisterDTO;
 import com.syr.entity.User;
 import com.syr.mapper.UserMapper;
 import com.syr.service.UserService;
+import com.syr.utils.UserHolder;
 import com.syr.vo.LoginVO;
 import com.syr.vo.UserVO;
 import lombok.RequiredArgsConstructor;
@@ -67,5 +69,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         UserVO vo = new UserVO();
         BeanUtil.copyProperties(user, vo);
         return vo;
+    }
+    @Override
+    public void updateMe(UserUpdateDTO dto) {
+        Long userId = UserHolder.getUserId();
+        User user = getById(userId);
+        if (user == null) throw new BusinessException(404, "用户不存在");
+
+        if (dto.getNickname() != null) user.setNickname(dto.getNickname());
+        if (dto.getAvatar()   != null) user.setAvatar(dto.getAvatar());
+        updateById(user);
     }
 }

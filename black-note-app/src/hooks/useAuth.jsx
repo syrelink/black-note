@@ -9,6 +9,14 @@ export function AuthProvider({ children }) {
     return saved ? JSON.parse(saved) : null  // 存完整用户对象
   })
 
+  const updateUser = (patch) => {
+    setUserInfo(prev => {
+      const next = { ...prev, ...patch }
+      localStorage.setItem('userInfo', JSON.stringify(next))
+      return next
+    })
+  }
+
   const login = (tk, info) => {  // info 是用户对象 {id, username, nickname, avatar}
     setToken(tk)
     setUserInfo(info)
@@ -24,8 +32,8 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{
-      token, userInfo, login, logout, isLogin: !!token,
+    <AuthContext.Provider value={{  
+      token, userInfo, login, logout, updateUser, isLogin: !!token,
       // 便捷属性
       username:  userInfo?.username  || '',
       nickname:  userInfo?.nickname  || userInfo?.username || '',

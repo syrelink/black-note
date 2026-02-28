@@ -8,23 +8,18 @@ import java.util.List;
 public class NoteVO {
 
     private Long id;
-
-    private Long userId;
-    private String nickname;
-    private String avatar;
     private String title;
 
     private String content;
-    private List<String> images;  // 返回给前端时拆成列表
+    private List<String> images;
     private Integer likeCount;
 
-    // 当前登录用户是否点赞了这篇笔记（从Redis Set判断后填入）
-    private Boolean liked;
+    private Boolean isLiked;
 
-    // 作者信息（避免前端再发一次请求）
-    private String authorName;
-
-    private String authorAvatar;
+    // 作者信息（从User表填充）
+    private Long   userId;
+    private String authorName;      // 作者昵称
+    private String authorAvatar;    // 作者头像
 
     private LocalDateTime createdAt;
 }

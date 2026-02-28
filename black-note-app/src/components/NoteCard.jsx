@@ -4,38 +4,20 @@ import { noteApi } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import styles from './NoteCard.module.css'
 
-export default function NoteCard({ note, onClick, index }) {
+export default function NoteCard({ note, onClick, index , onLike, likeMap}) {
   const { isLogin } = useAuth()
   const navigate    = useNavigate()
-
-  const [liked,   setLiked]   = useState(false)
-  const [count,   setCount]   = useState(note.likeCount || 0)
+  const liked = likeMap?.[note?.id]?.liked ?? !!note?.isLiked
+  const count = likeMap?.[note?.id]?.count ?? note?.likeCount ?? 0
   const [imgErr,  setImgErr]  = useState(false)
 
   const hasImg = note.images?.length > 0 && !imgErr
 
-  // 登录后从后端拉取点赞状态，刷新后也能恢复
-  useEffect(() => {
-    if (!isLogin || !note.id) return
-    noteApi.isLiked(note.id)
-      .then(res => setLiked(!!res.data))
-      .catch(() => {})
-  }, [note.id, isLogin])
 
-  // 同步后端返回的最新点赞数
-  useEffect(() => {
-    setCount(note.likeCount || 0)
-  }, [note.likeCount])
-
-  const handleLike = async (e) => {
+  const handleLike = (e) => {
     e.stopPropagation()
     if (!isLogin) return
-    try {
-      await noteApi.like(note.id)
-      const newLiked = !liked
-      setLiked(newLiked)
-      setCount(prev => newLiked ? prev + 1 : prev - 1)
-    } catch {}
+    onLike(note.id)  // 交给父组件处理
   }
 
   // 点击作者区域跳转用户主页
@@ -62,7 +44,8 @@ export default function NoteCard({ note, onClick, index }) {
 
       <div className={styles.body}>
         <div className={styles.title}>{note.title}</div>
-        <div className={styles.excerpt}>{note.content}</div>
+        <div className={styles.excerpt} 
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content || '') }}/>
 
         <div className={styles.footer}>
           {/* 作者信息：点击跳转用户主页 */}
@@ -89,4 +72,19 @@ export default function NoteCard({ note, onClick, index }) {
       </div>
     </div>
   )
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^## (.+)$/gm,    '<h2>$1</h2>')
+    .replace(/^### (.+)$/gm,   '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm,     '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,     '<em>$1</em>')
+    .replace(/`(.+?)`/g,       '<code>$1</code>')
+    .replace(/^- (.+)$/gm,     '<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
+    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/\n/g, '<br/>')
 }

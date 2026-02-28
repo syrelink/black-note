@@ -1,6 +1,7 @@
 package com.syr.service.Impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.syr.entity.Follow;
 import com.syr.entity.User;
@@ -60,9 +61,26 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         Set<String> commonIds = redisTemplate.opsForSet()
                 .intersect(FOLLOW_KEY + currentUserId, FOLLOW_KEY + targetUserId);
 
-        if (commonIds == null || commonIds.isEmpty()) return Collections.emptyList();
+        if (commonIds.isEmpty()) return Collections.emptyList();
 
         List<Long> idList = commonIds.stream().map(Long::valueOf).collect(Collectors.toList());
+        List<User> users = userService.listByIds(idList);
+
+        return users.stream().map(user -> {
+            UserVO vo = new UserVO();
+            BeanUtil.copyProperties(user, vo);
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<UserVO> followList(Long userId) {
+        // 从 Redis 中获取目标用户的关注/粉丝 ID 列表
+        Set<String> followIds = redisTemplate.opsForSet().members(FOLLOW_KEY + userId);
+        // 判断是否是空列表（没有关注任何人）
+        if (CollectionUtils.isEmpty(followIds)) return Collections.emptyList();
+        // String 转 Long
+        List<Long> idList = followIds.stream().map(Long::valueOf).collect(Collectors.toList());
         List<User> users = userService.listByIds(idList);
 
         return users.stream().map(user -> {

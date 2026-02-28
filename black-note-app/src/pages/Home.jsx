@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { noteApi, feedApi } from '../api'
+import { useNavigate } from 'react-router-dom'
+import { noteApi, followApi } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import Navbar from '../components/Navbar'
 import SearchBar from '../components/SearchBar'
@@ -21,57 +22,61 @@ const MOCK = [
 ]
 
 export default function Home() {
-  const { isLogin } = useAuth()
+  const { isLogin , userId: myId}  = useAuth()
+  const navigate     = useNavigate()
 
   const [tab,         setTab]         = useState('discover')
   const [notes,       setNotes]       = useState([])
+  const [followUsers, setFollowUsers] = useState([])
   const [loading,     setLoading]     = useState(false)
   const [hasMore,     setHasMore]     = useState(true)
   const [keyword,     setKeyword]     = useState('')
   const [activeNote,  setActiveNote]  = useState(null)
   const [showPublish, setShowPublish] = useState(false)
   const [showLogin,   setShowLogin]   = useState(false)
-
-  // 下拉刷新状态
+  const [likeMap,     setLikeMap]     = useState({})
   const [refreshing,  setRefreshing]  = useState(false)
-  const [pullDist,    setPullDist]    = useState(0)  // 下拉距离
+  const [pullDist,    setPullDist]    = useState(0)
 
   const discoverPageRef = useRef(1)
-  const lastTsRef       = useRef(0)
-  const loadingRef      = useRef(false)   // 防止重复请求
-  const hasMoreRef      = useRef(true)    // 同步hasMore给scroll监听
+  const loadingRef      = useRef(false)
+  const hasMoreRef      = useRef(true)
+  const touchStartY     = useRef(0)
+  const PULL_THRESHOLD  = 70
 
-  // 下拉刷新的触摸记录
-  const touchStartY = useRef(0)
-  const PULL_THRESHOLD = 70  // 下拉超过70px触发刷新
-
-  // ── 加载笔记 ──
+  // ── 加载数据 ──
   const loadNotes = useCallback(async (reset) => {
-    if (loadingRef.current) return       // 防止重复请求
-    if (!reset && !hasMoreRef.current) return  // 没有更多数据了
+    if (loadingRef.current) return
+    if (!reset && !hasMoreRef.current) return
 
     loadingRef.current = true
     setLoading(true)
 
     try {
-      let list = [], more = false
-
+      // 关注 Tab：拉取关注的人列表
       if (tab === 'follow' && isLogin) {
-        const ts = reset ? 0 : lastTsRef.current
-        const res = await feedApi.getFeed(ts, 20)
-        list = res.data?.list    || []
-        more = res.data?.hasMore || false
-        lastTsRef.current = res.data?.nextTimestamp || 0
-
-      } else {
-        const page = reset ? 1 : discoverPageRef.current
-        const res  = await noteApi.noteList(page, 20)
-        list = res.data || []
-        more = list.length === 20
-        discoverPageRef.current = reset ? 2 : page + 1
+        const res = await followApi.followList(myId)
+        setFollowUsers(res.data || [])
+        return
       }
 
+      // 发现 Tab：拉取笔记列表
+      const page = reset ? 1 : discoverPageRef.current
+      const res  = await noteApi.noteList(page, 20)
+      const list = res.data || []
+      const more = list.length === 20
+      discoverPageRef.current = reset ? 2 : page + 1
+
       setNotes(prev => reset ? list : [...prev, ...list])
+      setLikeMap(prev => {
+        const next = { ...prev }
+        list.forEach(n => {
+          if (!next[n.id]) {
+            next[n.id] = { liked: !!n.isLiked, count: n.likeCount || 0 }
+          }
+        })
+        return next
+      })
       setHasMore(more)
       hasMoreRef.current = more
 
@@ -85,55 +90,51 @@ export default function Home() {
     }
   }, [tab, isLogin])
 
+  // 点赞处理
+  const handleLike = async (noteId) => {
+    if (!isLogin) return
+    await noteApi.like(noteId)
+    setLikeMap(prev => {
+      const cur      = prev[noteId] || { liked: false, count: 0 }
+      const newLiked = !cur.liked
+      return {
+        ...prev,
+        [noteId]: { liked: newLiked, count: newLiked ? cur.count + 1 : cur.count - 1 }
+      }
+    })
+  }
+
   // tab / 登录状态变化时重置
   useEffect(() => {
-    lastTsRef.current = 0
     discoverPageRef.current = 1
     hasMoreRef.current = true
     loadNotes(true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, isLogin])
 
-  // ── 无限滚动：监听滚动到底部 ──
+  // 无限滚动
   useEffect(() => {
     const handleScroll = () => {
-      // 距离底部还有200px时提前加载，体验更流畅
-      const distFromBottom = document.documentElement.scrollHeight
-        - window.scrollY
-        - window.innerHeight
-
-      if (distFromBottom < 200) {
-        loadNotes(false)
-      }
+      const distFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight
+      if (distFromBottom < 200) loadNotes(false)
     }
-
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [loadNotes])
 
-  // ── 下拉刷新：触摸事件 ──
+  // 下拉刷新
   useEffect(() => {
     const handleTouchStart = (e) => {
-      // 只有在页面顶部才允许触发下拉
-      if (window.scrollY === 0) {
-        touchStartY.current = e.touches[0].clientY
-      } else {
-        touchStartY.current = 0
-      }
+      touchStartY.current = window.scrollY === 0 ? e.touches[0].clientY : 0
     }
-
     const handleTouchMove = (e) => {
       if (!touchStartY.current) return
       const dist = e.touches[0].clientY - touchStartY.current
-      if (dist > 0 && dist < 120) {
-        setPullDist(dist)
-      }
+      if (dist > 0 && dist < 120) setPullDist(dist)
     }
-
     const handleTouchEnd = async () => {
       if (pullDist >= PULL_THRESHOLD) {
         setRefreshing(true)
-        lastTsRef.current = 0
         discoverPageRef.current = 1
         hasMoreRef.current = true
         await loadNotes(true)
@@ -142,11 +143,9 @@ export default function Home() {
       setPullDist(0)
       touchStartY.current = 0
     }
-
     window.addEventListener('touchstart', handleTouchStart, { passive: true })
     window.addEventListener('touchmove',  handleTouchMove,  { passive: true })
     window.addEventListener('touchend',   handleTouchEnd)
-
     return () => {
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove',  handleTouchMove)
@@ -163,10 +162,9 @@ export default function Home() {
     ? notes.filter(n => n.title?.includes(keyword) || n.content?.includes(keyword))
     : notes
 
-  // 下拉刷新指示器的样式（跟随手指移动）
   const pullIndicatorStyle = {
-    transform: `translateY(${Math.min(pullDist, PULL_THRESHOLD) - 40}px)`,
-    opacity: pullDist / PULL_THRESHOLD,
+    transform:  `translateY(${Math.min(pullDist, PULL_THRESHOLD) - 40}px)`,
+    opacity:    pullDist / PULL_THRESHOLD,
     transition: pullDist === 0 ? 'all .3s ease' : 'none',
   }
 
@@ -182,7 +180,6 @@ export default function Home() {
       <SearchBar
         onSearch={setKeyword}
         onTagChange={() => {
-          lastTsRef.current = 0
           discoverPageRef.current = 1
           hasMoreRef.current = true
           loadNotes(true)
@@ -191,27 +188,62 @@ export default function Home() {
 
       {/* 下拉刷新指示器 */}
       <div className={styles.pullIndicator} style={pullIndicatorStyle}>
-        {refreshing ? (
-          <div className={styles.refreshSpinner} />
-        ) : (
-          <span>{pullDist >= PULL_THRESHOLD ? '松开刷新' : '下拉刷新'}</span>
-        )}
+        {refreshing
+          ? <div className={styles.refreshSpinner} />
+          : <span>{pullDist >= PULL_THRESHOLD ? '松开刷新' : '下拉刷新'}</span>
+        }
       </div>
 
       <main className={styles.main}>
 
-        {displayNotes.length > 0 && (
-          <Masonry notes={displayNotes} onCardClick={setActiveNote} />
+        {/* ── 关注 Tab：展示关注的人列表 ── */}
+        {tab === 'follow' && !loading && (
+          followUsers.length === 0 ? (
+            <div className={styles.empty}>
+              <div className={styles.emptyIcon}>👥</div>
+              <p>还没有关注任何人，去发现更多吧</p>
+            </div>
+          ) : (
+            <div className={styles.followList}>
+              {followUsers.map(user => (
+                <div
+                  key={user.id}
+                  className={styles.followItem}
+                  onClick={() => navigate(`/user/${user.id}`)}
+                >
+                  <div className={styles.followAvatar}>
+                    {user.avatar
+                      ? <img src={user.avatar} alt={user.nickname} />
+                      : <span>{(user.nickname || user.username)?.charAt(0)}</span>
+                    }
+                  </div>
+                  <span className={styles.followName}>
+                    {user.nickname || user.username}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
         )}
 
-        {!loading && displayNotes.length === 0 && (
+        {/* ── 发现 Tab：笔记瀑布流 ── */}
+        {tab === 'discover' && displayNotes.length > 0 && (
+          <Masonry
+            notes={displayNotes}
+            onCardClick={setActiveNote}
+            onLike={handleLike}
+            likeMap={likeMap}
+          />
+        )}
+
+        {tab === 'discover' && !loading && displayNotes.length === 0 && (
           <div className={styles.empty}>
             <div className={styles.emptyIcon}>📖</div>
-            <p>{tab === 'follow' ? '还没有关注的人，去发现更多吧' : '暂无笔记'}</p>
+            <p>暂无笔记</p>
           </div>
         )}
 
-        {/* 底部加载状态 */}
+        {/* 加载中 */}
         {loading && !refreshing && (
           <div className={styles.bottomLoading}>
             <div className={styles.spinner} />
@@ -219,15 +251,20 @@ export default function Home() {
           </div>
         )}
 
-        {/* 没有更多了 */}
-        {!hasMore && !loading && notes.length > 0 && (
+        {/* 没有更多 */}
+        {tab === 'discover' && !hasMore && !loading && notes.length > 0 && (
           <div className={styles.noMore}>— 已经到底了 —</div>
         )}
 
       </main>
 
       {activeNote && (
-        <NoteDetail note={activeNote} onClose={() => setActiveNote(null)} />
+        <NoteDetail
+          note={activeNote}
+          onClose={() => setActiveNote(null)}
+          onLike={handleLike}
+          likeMap={likeMap}
+        />
       )}
 
       {showPublish && (
@@ -235,7 +272,6 @@ export default function Home() {
           onClose={() => setShowPublish(false)}
           onSuccess={() => {
             discoverPageRef.current = 1
-            lastTsRef.current = 0
             hasMoreRef.current = true
             loadNotes(true)
           }}

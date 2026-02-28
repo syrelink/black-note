@@ -16,6 +16,4 @@ public class UserVO {
 
     private LocalDateTime createdAt;
 
-
-    // 注意：password 字段不在VO里，永远不返回给前端
 }

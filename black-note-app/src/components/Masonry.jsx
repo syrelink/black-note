@@ -1,9 +1,7 @@
 import NoteCard from './NoteCard'
 import styles from './Masonry.module.css'
 
-export default function Masonry({ notes, onCardClick }) {
-  if (!notes || notes.length === 0) return null
-
+export default function Masonry({ notes, onCardClick, likeMap, onLike }) {
   return (
     <div className={styles.grid}>
       {notes.map((note, i) => (
@@ -12,6 +10,8 @@ export default function Masonry({ notes, onCardClick }) {
           note={note}
           index={i}
           onClick={onCardClick}
+          likeMap={likeMap}
+          onLike={onLike}
         />
       ))}
     </div>

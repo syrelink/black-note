@@ -3,6 +3,7 @@ package com.syr.controller;
 import com.syr.dto.Result;
 import com.syr.dto.LoginDTO;
 import com.syr.dto.RegisterDTO;
+import com.syr.dto.UserUpdateDTO;
 import com.syr.service.UserService;
 import com.syr.utils.UserHolder;
 import com.syr.vo.LoginVO;
@@ -34,9 +35,9 @@ public class UserController {
         return Result.success(userService.getUserById(id));
     }
 
-    @GetMapping("/me")
-    public Result<UserVO> getMe() {
-        Long userId = UserHolder.getUserId();
-        return Result.success(userService.getUserById(userId));
+    @PutMapping("/me")
+    public Result<Void> updateMe(@RequestBody @Valid UserUpdateDTO dto) {
+        userService.updateMe(dto);
+        return Result.success();
     }
 }

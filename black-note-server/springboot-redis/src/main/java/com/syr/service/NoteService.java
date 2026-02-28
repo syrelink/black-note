@@ -20,4 +20,5 @@ public interface NoteService extends IService<Note> {
 
     List<NoteVO> noteList(Integer page, Integer size);
 
+    void updateNote(Long id, NotePublishDTO dto);
 }

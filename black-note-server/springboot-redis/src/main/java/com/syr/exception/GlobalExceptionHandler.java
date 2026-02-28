@@ -25,7 +25,7 @@ public class GlobalExceptionHandler {
                 .map(FieldError::getDefaultMessage)
                 .orElse("参数错误");
         log.warn("参数校验失败: {}", msg);
-        return Result.fail(msg);
+        return Result.fail(400,msg);
     }
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public Result handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {

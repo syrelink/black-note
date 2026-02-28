@@ -6,7 +6,7 @@ export default function Navbar({ activeTab, onTabChange, onPublish, onLogin }) {
   const { nickname, avatar, isLogin, logout, userId } = useAuth()
   const navigate = useNavigate()
 
-  return (
+  return (  
     <nav className={styles.nav}>
       {/* Logo */}
       <div className={styles.logo} onClick={() => navigate('/')}>
