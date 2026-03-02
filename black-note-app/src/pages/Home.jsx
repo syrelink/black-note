@@ -253,6 +253,10 @@ export default function Home() {
           onClose={() => setActiveNote(null)}
           onLike={handleLike}
           likeMap={likeMap}
+          onDeleted={() => {                              // 加这个
+            setNotes(prev => prev.filter(n => n.id !== activeNote.id))
+            setActiveNote(null)
+          }}
         />
       )}
 

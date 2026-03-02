@@ -42,3 +42,76 @@ a { text-decoration: none; color: inherit; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+/* ── 手机端底部安全区 ── */
+@media (max-width: 640px) {
+  body { padding-bottom: 56px; }
+}
+
+/* ── MDEditor 渲染字体统一 ── */
+.wmde-markdown {
+  font-family: 'Noto Serif SC', serif !important;
+  font-size: .95rem !important;
+  line-height: 1.7 !important;
+  color: #2c2c2c !important;
+  background: transparent !important;
+}
+.wmde-markdown h1 {
+  font-size: 1.7rem !important; font-weight: 600 !important;
+  color: #1a1a1a !important;
+  border-bottom: 1px solid var(--border) !important;
+  padding-bottom: .4rem !important;
+  margin: 1.5rem 0 .6rem !important;
+}
+.wmde-markdown h2 {
+  font-size: 1.3rem !important; font-weight: 600 !important;
+  color: #1a1a1a !important;
+  margin: 1.3rem 0 .5rem !important;
+}
+.wmde-markdown h3 {
+  font-size: 1.1rem !important; font-weight: 600 !important;
+  color: #333 !important;
+  margin: 1rem 0 .4rem !important;
+}
+.wmde-markdown p { margin: 0 0 .4rem !important; }
+.wmde-markdown strong { color: #1a1a1a !important; }
+.wmde-markdown em { font-style: italic !important; color: #555 !important; }
+.wmde-markdown code {
+  font-family: 'DM Mono', monospace !important;
+  font-size: .82rem !important;
+  background: var(--tag-bg) !important;
+  padding: .15rem .4rem !important;
+  border-radius: 3px !important;
+  color: var(--accent) !important;
+}
+.wmde-markdown pre {
+  background: #f7f5f2 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  padding: 1rem 1.2rem !important;
+  margin: 1rem 0 !important;
+}
+.wmde-markdown pre code {
+  background: none !important;
+  color: #2c2c2c !important;
+  padding: 0 !important;
+}
+.wmde-markdown blockquote {
+  border-left: 3px solid var(--accent) !important;
+  color: var(--muted) !important;
+  font-style: italic !important;
+  padding: .3rem 0 .3rem 1rem !important;
+  margin: 1rem 0 !important;
+}
+.wmde-markdown ul,
+.wmde-markdown ol {
+  padding-left: 1.5rem !important;
+  margin: .5rem 0 1rem !important;
+}
+.wmde-markdown li { margin-bottom: .3rem !important; }
+.wmde-markdown a { color: var(--accent) !important; text-decoration: underline !important; }
+.wmde-markdown hr {
+  border: none !important;
+  border-top: 1px solid var(--border) !important;
+  margin: 1.5rem 0 !important;
+}
+.wmde-markdown img { max-width: 100% !important; border-radius: 4px !important; }

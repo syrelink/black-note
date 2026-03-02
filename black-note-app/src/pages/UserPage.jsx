@@ -149,7 +149,14 @@ export default function UserPage() {
       )}
 
       {activeNote && (
-        <NoteDetail note={activeNote} onClose={() => setActiveNote(null)} />
+        <NoteDetail note={activeNote} onClose={() => setActiveNote(null)}
+        onLike={() => {}}
+        likeMap={{}}
+        onDeleted={() => {
+          setNotes(prev => prev.filter(n => n.id !== activeNote.id))
+          setActiveNote(null)
+        }}
+        />
       )}
 
       {/* 编辑资料弹窗 */}

@@ -86,8 +86,6 @@
 
 .rightFull {
   width: 100%;
-  max-width: 600px;
-  margin: 0 auto;
 }
 
 .authorActions { display: flex; gap: .5rem; }
@@ -150,6 +148,7 @@
 .content {
   font-size: .86rem; line-height: 1.9;
   color: #3a3530; flex: 1;
+  font-family: 'Lora', 'Noto Serif SC', 'SimSun', Georgia, serif; /* 加这行 */
 }
 .content h1 { font-size: 1.3rem; margin: .6rem 0 .3rem; }
 .content h2 { font-size: 1.1rem; margin: .6rem 0 .3rem; }
