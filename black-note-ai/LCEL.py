@@ -2,10 +2,9 @@ import os
 from dotenv import load_dotenv
 from typing import Dict
 
-from langchain_classic.chains.history_aware_retriever import create_history_aware_retriever
-from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
@@ -90,15 +89,19 @@ def build_conversational_rag_chain(
             store[session_id] = InMemoryChatMessageHistory()
         return store[session_id]
 
-    # 历史感知检索器
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, contextualize_prompt
+    # 纯 LCEL: 历史感知检索链（手动构建）
+    history_aware_retriever = (
+        contextualize_prompt
+        | llm
+        | StrOutputParser()
+        | retriever
+        | format_docs
     )
 
     # 主链
     rag_chain = (
         RunnablePassthrough.assign(
-            context=history_aware_retriever | format_docs
+            context=history_aware_retriever
         )
         | answer_prompt
         | llm

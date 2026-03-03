@@ -1,14 +1,19 @@
 import os
 from dotenv import load_dotenv
+from typing import Dict
+
+# 新版正确导入（2026 年标准写法）
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.history_aware_retriever import create_history_aware_retriever
+
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.runnables import RunnableWithMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
+
 from sentence_transformers import SentenceTransformer
-from typing import List
 
 load_dotenv()
 
@@ -43,156 +48,117 @@ def load_vectorstore(embeddings):
     vectorstore = Chroma(
         persist_directory="./chroma_db",
         embedding_function=embeddings,
-        collection_name="black_note"
+        collection_name="black_note_all"
     )
     print(f"✅ 已加载，共 {vectorstore._collection.count()} 条笔记")
     return vectorstore
 
 
-# ── 带Memory的RAG Chain ───────────────────────────
-class RAGWithMemory:
-    def __init__(self, vectorstore, user_id: str, max_history: int = 5):
-        self.user_id    = user_id
-        self.max_history = max_history
-        # 对话历史，存HumanMessage和AIMessage对象
-        self.history: List = []
+# ── 【标准版】带 Memory 的 RAG Chain ─────────────
+def build_rag_with_memory(vectorstore, user_id: str):
+    print("🔧 构建标准带Memory RAG Chain...")
 
-        # 检索器，只查当前用户的笔记
-        self.retriever = vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={
-                "k": 3,
-                "filter": {"user_id": user_id}
-            }
-        )
+    # 1. 检索器（保留你的 user_id 过滤）
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 3, "filter": {"user_id": user_id}}
+    )
 
-        # LLM
-        self.llm = ChatOpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url=os.getenv("DEEPSEEK_BASE_URL"),
-            model=os.getenv("DEEPSEEK_MODEL"),
-            temperature=0.3
-        )
+    # 2. LLM
+    llm = ChatOpenAI(
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL"),
+        model=os.getenv("DEEPSEEK_MODEL"),
+        temperature=0.3
+    )
 
-        # Prompt：加入chat_history占位符
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """你是用户的私人笔记助手。
+    # 3. 【关键】上下文重写 Prompt（让 follow-up 问题也召回正确笔记）
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", "根据聊天历史和当前问题，把当前问题改写成一个独立、完整的查询。"),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+    ])
 
-规则：
-1. 严格基于提供的笔记内容回答
-2. 结合对话历史理解用户意图
-3. 笔记中没有相关内容时，直接说"您的笔记中暂无相关内容"
-4. 回答时注明来自哪篇笔记
-5. 语言简洁自然
+    # 4. 创建 history-aware retriever（官方标准）
+    history_aware_retriever = create_history_aware_retriever(
+        llm=llm,
+        retriever=retriever,
+        prompt=contextualize_q_prompt
+    )
 
-相关笔记内容：
-{context}"""),
-            # 对话历史插入这里
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{question}"),
-        ])
+    # 5. 最终问答 Prompt（你的笔记助手人格）
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", """你是用户的私人笔记助手牧濑红莉栖。
+        严格基于下方提供的笔记内容回答问题。
+        规则：
+        1. 只能使用提供的笔记内容
+        2. 没有相关内容时，直接说“您的笔记中暂无相关内容”
+        3. 回答时注明来自哪篇笔记
+        4. 语言简洁自然，带有牧濑红莉栖(命运石之门)的气质与性格
 
-    def _format_docs(self, docs):
-        formatted = []
-        for i, doc in enumerate(docs, 1):
-            formatted.append(
-                f"【笔记{i}】标题：{doc.metadata['title']}\n"
-                f"内容：{doc.page_content}\n"
-            )
-        return "\n".join(formatted)
+        相关笔记内容：
+        {context}"""),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+    ])
 
-    def _get_recent_history(self):
-        # 只保留最近max_history轮，避免Token超限
-        # 每轮=1条Human+1条AI，所以取 max_history*2 条消息
-        return self.history[-(self.max_history * 2):]
+    # 6. 问答子链
+    question_answer_chain = qa_prompt | llm
 
-    def chat(self, question: str) -> str:
-        # 1. 检索相关笔记
-        docs    = self.retriever.invoke(question)
-        context = self._format_docs(docs)
+    # 7. 完整 RAG Chain（官方 create_retrieval_chain）
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-        # 2. 构建输入，带上历史
-        chain_input = {
-            "context":      context,
-            "chat_history": self._get_recent_history(),
-            "question":     question,
-        }
+    # 8. 自动管理历史（支持多用户）
+    store: Dict[str, InMemoryChatMessageHistory] = {}
 
-        # 3. 调用LLM
-        chain    = self.prompt | self.llm | StrOutputParser()
-        answer   = chain.invoke(chain_input)
+    def get_session_history(session_id: str) -> BaseChatMessageHistory:
+        if session_id not in store:
+            store[session_id] = InMemoryChatMessageHistory()
+        return store[session_id]
 
-        # 4. 把本轮对话存入历史
-        self.history.append(HumanMessage(content=question))
-        self.history.append(AIMessage(content=answer))
+    # 9. 最终可对话的 Chain（带 Memory）
+    conversational_rag_chain = RunnableWithMessageHistory(
+        rag_chain,
+        get_session_history,
+        input_messages_key="input",          # 用户输入的 key
+        history_messages_key="chat_history", # 历史在 prompt 里的 key
+        output_messages_key="answer",        # 输出字段
+    )
 
-        return answer
-
-    def clear_history(self):
-        self.history = []
-        print("🗑️  对话历史已清空")
-
-    def show_history(self):
-        print(f"\n📜 当前对话历史（{len(self.history)//2}轮）：")
-        for i, msg in enumerate(self.history):
-            role = "👤 用户" if isinstance(msg, HumanMessage) else "🤖 AI"
-            print(f"  {role}：{msg.content[:50]}...")
+    print("✅ 标准带Memory RAG Chain 构建完成！")
+    return conversational_rag_chain
 
 
-# ── 测试多轮对话 ──────────────────────────────────
-def test_multi_turn(rag: RAGWithMemory):
-    print("\n" + "="*40)
-    print("Day4 测试：多轮对话")
-    print("输入 'quit' 退出，'history' 查看历史，'clear' 清空历史")
-    print("="*40)
 
-    # 先跑一组预设的多轮对话，验证Memory效果
-    preset_conversations = [
-        "我写过哪些技术相关的笔记？",
-        "第一篇讲的是什么内容？",      # 考验Memory：第一篇指上文的第一篇
-        "它和第二篇有什么区别？",       # 考验Memory：它和第二篇都需要记住上下文
-        "有没有关于情绪的笔记？",       # 切换话题
-        "这些笔记是什么时候写的？",     # 考验Memory：这些笔记指上文召回的笔记
-    ]
-
-    print("\n【预设多轮对话测试】")
-    for q in preset_conversations:
-        print(f"\n👤 用户：{q}")
-        print("-" * 30)
-        answer = rag.chat(q)
-        print(f"🤖 AI：{answer}")
-
-    # 展示历史
-    rag.show_history()
-
-    # 进入交互模式
-    print("\n\n【进入交互模式，可以自由提问】")
-    while True:
-        user_input = input("\n👤 你：").strip()
-        if not user_input:
-            continue
-        if user_input == "quit":
-            break
-        if user_input == "history":
-            rag.show_history()
-            continue
-        if user_input == "clear":
-            rag.clear_history()
-            continue
-
-        answer = rag.chat(user_input)
-        print(f"🤖 AI：{answer}")
-
-
-# ── 主入口 ────────────────────────────────────────
-if __name__ == "__main__":
-    CURRENT_USER_ID = "3"  # 改成你的user_id
-
-    embeddings  = BGEEmbeddings()
+# ── 测试（超级简洁）────────────────────────────
+def test_standard_rag():
+    embeddings = BGEEmbeddings()
     vectorstore = load_vectorstore(embeddings)
-    rag         = RAGWithMemory(
-                    vectorstore,
-                    user_id=CURRENT_USER_ID,
-                    max_history=5
-                  )
-    test_multi_turn(rag)
+
+    rag_chain = build_rag_with_memory(vectorstore, user_id="3")
+
+    print("\n" + "="*50)
+    print("🎉 标准版多轮对话已启动！（支持 history-aware）")
+    print("输入 'quit' 退出，'clear' 清空当前用户历史")
+    print("="*50)
+
+    session_id = "user_3"   # 可以改成动态的
+
+    while True:
+        q = input("\n👤 你：").strip()
+        if q.lower() in ["quit", "退出"]: 
+            break
+        if q.lower() == "clear":
+            rag_chain.invoke({"input": ""}, config={"configurable": {"session_id": session_id}})  # 实际清空用 store[session_id].clear()
+            print("🗑️ 历史已清空")
+            continue
+
+        response = rag_chain.invoke(
+            {"input": q},
+            config={"configurable": {"session_id": session_id}}
+        )
+        print(f"🤖 AI：{response['answer']}")
+
+
+if __name__ == "__main__":
+    test_standard_rag()
