@@ -1,52 +1,36 @@
 import { useState, useRef, useEffect } from 'react'
-import katex from 'katex'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import rehypeHighlight from 'rehype-highlight'
 import 'katex/dist/katex.min.css'
+import 'highlight.js/styles/github.css'
 import { noteApi, fileApi } from '../api'
 import styles from './PublishModal.module.css'
 
-function renderKatex(formula, displayMode) {
-  try {
-    return katex.renderToString(formula, { displayMode, throwOnError: false, output: 'html' })
-  } catch { return formula }
-}
-
-function renderMarkdown(text) {
-  if (!text) return ''
-  const blocks = []
-  const BP = '___BLK___', IP = '___INL___'
-
-  let r = text
-    .replace(/\$\$([\s\S]+?)\$\$/g, (_, f) => { blocks.push(renderKatex(f.trim(), true));  return `${BP}${blocks.length-1}___` })
-    .replace(/\$([^\n$]+?)\$/g,     (_, f) => { blocks.push(renderKatex(f.trim(), false)); return `${IP}${blocks.length-1}___` })
-
-  r = r
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/^#{3} (.+)$/gm,'<h3>$1</h3>')
-    .replace(/^#{2} (.+)$/gm,'<h2>$1</h2>')
-    .replace(/^#{1} (.+)$/gm,'<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,'<em>$1</em>')
-    .replace(/`{3}([\s\S]*?)`{3}/g,'<pre><code>$1</code></pre>')
-    .replace(/`(.+?)`/g,'<code>$1</code>')
-    .replace(/^> (.+)$/gm,'<blockquote>$1</blockquote>')
-    .replace(/^- (.+)$/gm,'<li>$1</li>')
-    .replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>')
-    .replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank">$1</a>')
-    .replace(/---/g,'<hr/>')
-    .replace(/\n/g,'<br/>')
-
-  r = r.replace(new RegExp(`(${BP}|${IP})(\\d+)___`,'g'), (_,__,i) => blocks[parseInt(i)])
-  return r
+// 和 EditPage 完全一致的预览组件
+function MarkdownPreview({ content, className }) {
+  return (
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+      >
+        {content || ' '}
+      </ReactMarkdown>
+    </div>
+  )
 }
 
 export default function PublishModal({ onClose, onSuccess }) {
-  const [title,      setTitle]     = useState('')
-  const [content,    setContent]   = useState('')
-  const [images,     setImages]    = useState([])
-  const [uploading,  setUploading] = useState(false)
-  const [submitting, setSubmitting]= useState(false)
-  const [msg,        setMsg]       = useState('')
-  const [tab,        setTab]       = useState('edit') // 'edit' | 'preview'
+  const [title,      setTitle]      = useState('')
+  const [content,    setContent]    = useState('')
+  const [images,     setImages]     = useState([])
+  const [uploading,  setUploading]  = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [msg,        setMsg]        = useState('')
+  const [mode,       setMode]       = useState('edit') // 'edit' | 'split' | 'preview'
 
   const textareaRef = useRef(null)
 
@@ -55,8 +39,8 @@ export default function PublishModal({ onClose, onSuccess }) {
     const ta = textareaRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = Math.max(ta.scrollHeight, 220) + 'px'
-  }, [content])
+    ta.style.height = Math.max(ta.scrollHeight, 300) + 'px'
+  }, [content, mode])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Tab') {
@@ -101,10 +85,11 @@ export default function PublishModal({ onClose, onSuccess }) {
   }
 
   return (
-    <div className={styles.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+    // ★ 不加 onClick，点击遮罩不关闭，只能点 ✕ 按钮关闭
+    <div className={styles.overlay}>
       <div className={styles.modal}>
 
-        {/* 顶部 */}
+        {/* ── 顶部栏：标题 + 模式切换 + 关闭 ── */}
         <div className={styles.header}>
           <input
             className={styles.titleInput}
@@ -114,66 +99,77 @@ export default function PublishModal({ onClose, onSuccess }) {
             onChange={e => setTitle(e.target.value)}
             maxLength={128}
           />
+
+          <div className={styles.modeSwitch}>
+            {[
+              { key: 'edit',    label: '编辑' },
+              { key: 'split',   label: '分栏' },
+              { key: 'preview', label: '预览' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                className={`${styles.modeBtn} ${mode === key ? styles.modeActive : ''}`}
+                onClick={() => setMode(key)}
+              >{label}</button>
+            ))}
+          </div>
+
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
         </div>
 
-        <div className={styles.divider} />
+        <div className={styles.headerDivider} />
 
-        {/* 编辑/预览切换 */}
-        <div className={styles.tabBar}>
-          <button
-            className={`${styles.tabBtn} ${tab === 'edit' ? styles.tabActive : ''}`}
-            onClick={() => setTab('edit')}
-          >编辑</button>
-          <button
-            className={`${styles.tabBtn} ${tab === 'preview' ? styles.tabActive : ''}`}
-            onClick={() => setTab('preview')}
-          >预览</button>
-          <span className={styles.tabHint}>支持 Markdown · LaTeX 公式</span>
-        </div>
+        {/* ── 编辑器主区域 ── */}
+        <div className={`${styles.editorWrap} ${styles['mode_' + mode]}`}>
 
-        {/* 内容区 */}
-        <div className={styles.editorArea}>
-          {tab === 'edit' ? (
-            <textarea
-              ref={textareaRef}
-              className={styles.editor}
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`开始写作...\n\n# 标题  **粗体**  *斜体*\n- 列表项\n> 引用\n\n行内公式：$E=mc^2$\n块级公式：$$\\int f(x)dx$$`}
-            />
-          ) : (
-            <div
-              className={styles.preview}
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(content) || '<span class="' + styles.previewEmpty + '">暂无内容</span>' }}
+          {/* 编辑区 */}
+          {(mode === 'edit' || mode === 'split') && (
+            <div className={styles.editPane}>
+              <textarea
+                ref={textareaRef}
+                className={styles.editor}
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`开始写作...\n\n支持完整 Markdown + LaTeX：\n# 一级标题\n## 二级标题\n**粗体**  *斜体*  \`行内代码\`\n\n- 无序列表\n1. 有序列表\n\n| 表头A | 表头B |\n|-------|-------|\n| 内容  | 内容  |\n\n> 引用块\n\n行内公式：$E = mc^2$\n块级公式：\n$$\n\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n$$`}
+              />
+            </div>
+          )}
+
+          {/* 分栏分割线 */}
+          {mode === 'split' && <div className={styles.splitLine} />}
+
+          {/* 预览区 */}
+          {(mode === 'preview' || mode === 'split') && (
+            <MarkdownPreview
+              content={content}
+              className={styles.previewPane}
             />
           )}
         </div>
 
-        {/* 图片上传 */}
-        <div className={styles.imageRow}>
-          <label className={styles.uploadBtn}>
-            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFile} />
-            {uploading ? '上传中...' : '+ 添加图片'}
-          </label>
-
-          {images.map((url, i) => (
-            <div key={i} className={styles.imgThumb}>
-              <img src={url} alt="" />
-              <button onClick={() => removeImage(i)}>✕</button>
-            </div>
-          ))}
-        </div>
-
-        {msg && <div className={styles.msg}>{msg}</div>}
-
-        {/* 底部操作 */}
+        {/* ── 底部：图片 + 操作按钮 ── */}
         <div className={styles.footer}>
-          <button className={styles.btnCancel} onClick={onClose}>取消</button>
-          <button className={styles.btnSubmit} onClick={handleSubmit} disabled={submitting}>
-            {submitting ? '发布中...' : '发布'}
-          </button>
+          <div className={styles.imageRow}>
+            <label className={styles.uploadBtn}>
+              <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFile} />
+              {uploading ? '上传中' : '+ 图片'}
+            </label>
+            {images.map((url, i) => (
+              <div key={i} className={styles.imgThumb}>
+                <img src={url} alt="" />
+                <button onClick={() => removeImage(i)}>✕</button>
+              </div>
+            ))}
+          </div>
+
+          <div className={styles.footerActions}>
+            {msg && <span className={styles.msg}>{msg}</span>}
+            <button className={styles.btnCancel} onClick={onClose}>取消</button>
+            <button className={styles.btnSubmit} onClick={handleSubmit} disabled={submitting}>
+              {submitting ? '发布中...' : '发布'}
+            </button>
+          </div>
         </div>
 
       </div>

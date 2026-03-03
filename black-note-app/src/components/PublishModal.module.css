@@ -4,7 +4,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12,25 +12,25 @@
   padding: 1rem;
 }
 
-/* ── 弹窗卡片 ── */
+/* ── 弹窗卡片：更大 ── */
 .modal {
   background: #faf9f7;
   border-radius: 16px;
-  width: 700px;
-  max-width: 96vw;
-  max-height: 88vh;
+  width: min(1100px, 94vw);   /* 比原来 700px 大很多 */
+  max-height: 92vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+  box-shadow: 0 24px 60px rgba(0,0,0,.2);
   overflow: hidden;
 }
 
-/* ── 顶部标题行 ── */
+/* ── 顶部栏：标题 + 模式切换 + 关闭 ── */
 .header {
   display: flex;
   align-items: center;
-  padding: 1.4rem 1.6rem 0;
-  gap: .75rem;
+  padding: 1.2rem 1.6rem 0;
+  gap: 1rem;
+  flex-shrink: 0;
 }
 
 .titleInput {
@@ -44,8 +44,39 @@
   outline: none;
   padding: 0;
   letter-spacing: .01em;
+  min-width: 0;
 }
 .titleInput::placeholder { color: #ccc; font-weight: 400; }
+
+/* ── 模式切换（和 EditPage 完全一致的设计） ── */
+.modeSwitch {
+  display: flex;
+  align-items: center;
+  background: #f0ede8;
+  border-radius: 6px;
+  padding: 3px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.modeBtn {
+  background: none;
+  border: none;
+  padding: .28rem .7rem;
+  font-size: .74rem;
+  color: #999;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .15s;
+  font-family: inherit;
+  letter-spacing: .03em;
+}
+.modeBtn:hover { color: #555; }
+.modeActive {
+  background: #fff;
+  color: #333 !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
 
 .closeBtn {
   background: none;
@@ -58,66 +89,77 @@
   transition: color .15s;
   flex-shrink: 0;
 }
-.closeBtn:hover { color: #555; }
+.closeBtn:hover { color: #333; }
 
-/* ── 分割线 ── */
-.divider {
+/* ── 顶部分割线 ── */
+.headerDivider {
   height: 1px;
   background: #e8e4de;
-  margin: 1rem 1.6rem 0;
+  margin: 1rem 0 0;
+  flex-shrink: 0;
 }
 
-/* ── Tab 切换栏 ── */
-.tabBar {
-  display: flex;
-  align-items: center;
-  gap: .2rem;
-  padding: .6rem 1.6rem .4rem;
-}
-
-.tabBtn {
-  background: none;
-  border: none;
-  font-size: .78rem;
-  color: #aaa;
-  cursor: pointer;
-  padding: .25rem .65rem;
-  border-radius: 4px;
-  transition: all .15s;
-  font-family: inherit;
-  letter-spacing: .03em;
-}
-.tabBtn:hover { color: #555; background: #f0ede8; }
-.tabActive {
-  color: #333 !important;
-  background: #ece9e4 !important;
-}
-
-.tabHint {
-  margin-left: auto;
-  font-size: .72rem;
-  color: #ccc;
-  letter-spacing: .03em;
-}
-
-/* ── 编辑器区域 ── */
-.editorArea {
+/* ── 编辑器容器 ── */
+.editorWrap {
   flex: 1;
-  overflow-y: auto;
-  padding: .6rem 1.6rem;
-  min-height: 220px;
+  overflow: hidden;
+  min-height: 0;      /* flex 子元素撑高必须 */
 }
 
+/* 单栏编辑 */
+.mode_edit {
+  overflow-y: auto;
+  padding: 1.2rem 1.6rem;
+}
+.mode_edit .editPane {
+  width: 100%;
+}
+
+/* 单栏预览 */
+.mode_preview {
+  overflow-y: auto;
+  padding: 1.2rem 1.6rem;
+}
+.mode_preview .previewPane {
+  width: 100%;
+}
+
+/* 分栏模式 */
+.mode_split {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  height: 100%;
+}
+.mode_split .editPane {
+  padding: 1.2rem 1.6rem 1.2rem 1.6rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;         /* ★ 防止撑破列宽 */
+}
+.mode_split .previewPane {
+  padding: 1.2rem 1.6rem 1.2rem 1.6rem;
+  overflow-y: auto;
+  overflow-x: auto;
+  min-width: 0;         /* ★ 防止撑破列宽 */
+}
+
+/* ── 分栏竖线 ── */
+.splitLine {
+  background: #e8e4de;
+  width: 1px;
+}
+
+/* ── textarea 编辑器 ── */
 .editor {
   width: 100%;
-  min-height: 220px;
+  min-height: 300px;
   border: none;
   background: transparent;
   outline: none;
   resize: none;
   overflow: hidden;
 
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
   font-size: .88rem;
   line-height: 1.75;
   color: #2c2c2c;
@@ -126,88 +168,203 @@
 
   padding: 0;
   box-sizing: border-box;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 .editor::placeholder {
   color: #ccc;
   font-style: italic;
   line-height: 1.9;
+  white-space: pre-wrap;
 }
 
 /* ── 预览区 ── */
-.preview {
+.previewPane {
   font-family: 'Lora', 'Noto Serif SC', Georgia, serif;
   font-size: .92rem;
   line-height: 1.75;
   color: #2c2c2c;
-  min-height: 220px;
+  min-height: 300px;
+  word-break: break-word;
 }
-.previewEmpty { color: #ccc; font-style: italic; font-size: .85rem; }
 
-.preview h1 { font-size: 1.4rem; font-weight: 600; margin: 1rem 0 .4rem; color: #1a1a1a; }
-.preview h2 { font-size: 1.15rem; font-weight: 600; margin: .8rem 0 .3rem; }
-.preview h3 { font-size: 1rem; font-weight: 600; margin: .6rem 0 .25rem; }
-.preview strong { color: #1a1a1a; }
-.preview em { font-style: italic; color: #555; }
-.preview code {
+/* ── 预览区 Markdown 样式（和 EditPage 完全一致） ── */
+.previewPane h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 1.2rem 0 .5rem;
+  border-bottom: 2px solid #e0dbd4;
+  padding-bottom: .35rem;
+  color: #1a1a1a;
+}
+.previewPane h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 1rem 0 .4rem;
+  color: #1a1a1a;
+}
+.previewPane h3 {
+  font-size: 1.02rem;
+  font-weight: 600;
+  margin: .8rem 0 .3rem;
+  color: #333;
+}
+.previewPane p {
+  margin: .4rem 0;
+  line-height: 1.75;
+}
+.previewPane strong { color: #1a1a1a; font-weight: 600; }
+.previewPane em     { font-style: italic; color: #555; }
+
+/* 行内代码 */
+.previewPane code:not(pre code) {
   font-family: 'JetBrains Mono', monospace;
-  font-size: .8rem;
+  font-size: .82em;
   background: #f0ede8;
+  color: #c0392b;
   padding: .1rem .35rem;
   border-radius: 3px;
-  color: #c0392b;
 }
-.preview pre {
+
+/* 代码块 */
+.previewPane pre {
   background: #f7f5f2;
-  border: 1px solid #e8e4de;
+  border: 1px solid #e0dbd4;
   border-radius: 6px;
-  padding: .8rem 1rem;
+  padding: .9rem 1.1rem;
   overflow-x: auto;
   margin: .6rem 0;
+  font-size: .83rem;
+  line-height: 1.6;
 }
-.preview blockquote {
+.previewPane pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+  word-break: normal;
+  white-space: pre;
+}
+
+/* 引用块 */
+.previewPane blockquote {
   border-left: 3px solid #c0392b;
   margin: .6rem 0;
-  padding: .2rem 0 .2rem .8rem;
+  padding: .3rem 0 .3rem 1rem;
   color: #777;
   font-style: italic;
+  background: #fdf9f9;
 }
-.preview ul { padding-left: 1.4rem; margin: .3rem 0; }
-.preview li { margin-bottom: .2rem; }
-.preview a { color: #c0392b; text-decoration: underline; }
-.preview hr { border: none; border-top: 1px solid #e8e4de; margin: 1rem 0; }
+.previewPane blockquote p { margin: 0; }
 
-/* ── 图片行 ── */
+/* 列表 */
+.previewPane ul,
+.previewPane ol {
+  padding-left: 1.6rem;
+  margin: .4rem 0;
+}
+.previewPane li {
+  margin-bottom: .25rem;
+  line-height: 1.7;
+}
+.previewPane li > ul,
+.previewPane li > ol { margin-top: .2rem; }
+
+/* 表格 */
+.previewPane table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: .8rem 0;
+  font-size: .86rem;
+  display: block;
+  overflow-x: auto;
+}
+.previewPane th,
+.previewPane td {
+  border: 1px solid #e0dbd4;
+  padding: .4rem .7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.previewPane th {
+  background: #f5f2ee;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+.previewPane tr:nth-child(even) td { background: #faf9f7; }
+
+/* 分割线 */
+.previewPane hr {
+  border: none;
+  border-top: 1px solid #e0dbd4;
+  margin: 1rem 0;
+}
+
+/* 链接 */
+.previewPane a {
+  color: #c0392b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.previewPane a:hover { opacity: .75; }
+
+/* 图片 */
+.previewPane img {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: .4rem 0;
+}
+
+/* 任务列表 */
+.previewPane input[type="checkbox"] {
+  margin-right: .4rem;
+  accent-color: #c0392b;
+}
+
+/* ── 底部栏 ── */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .85rem 1.6rem;
+  border-top: 1px solid #e8e4de;
+  background: #f7f5f2;
+  flex-shrink: 0;
+  gap: 1rem;
+}
+
+/* 图片行 */
 .imageRow {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: .6rem;
-  padding: .8rem 1.6rem;
-  border-top: 1px solid #e8e4de;
+  gap: .5rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .uploadBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
+  width: 62px;
+  height: 62px;
   border: 1.5px dashed #d8d4ce;
   border-radius: 8px;
-  font-size: .75rem;
+  font-size: .74rem;
   color: #aaa;
   cursor: pointer;
   transition: all .2s;
   flex-shrink: 0;
   text-align: center;
-  line-height: 1.3;
+  line-height: 1.4;
 }
 .uploadBtn:hover { border-color: #c0392b; color: #c0392b; background: #fef9f9; }
 
 .imgThumb {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 62px;
+  height: 62px;
 }
 .imgThumb img {
   width: 100%;
@@ -226,7 +383,7 @@
   color: white;
   border: none;
   border-radius: 50%;
-  font-size: .58rem;
+  font-size: .56rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -235,31 +392,26 @@
 }
 .imgThumb button:hover { background: #c0392b; }
 
-/* ── 错误提示 ── */
+/* 右侧按钮区 */
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-shrink: 0;
+}
+
 .msg {
-  padding: 0 1.6rem .4rem;
   font-size: .78rem;
   color: #c0392b;
 }
 
-/* ── 底部操作栏 ── */
-.footer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: .75rem;
-  padding: .9rem 1.6rem;
-  border-top: 1px solid #e8e4de;
-  background: #f7f5f2;
-}
-
 .btnCancel {
-  padding: .45rem 1.3rem;
+  padding: .42rem 1.2rem;
   border: 1px solid #ddd;
   border-radius: 6px;
   background: #fff;
   color: #555;
-  font-size: .82rem;
+  font-size: .8rem;
   cursor: pointer;
   font-family: inherit;
   transition: all .15s;
@@ -267,7 +419,7 @@
 .btnCancel:hover { background: #f5f5f5; border-color: #bbb; }
 
 .btnSubmit {
-  padding: .45rem 1.6rem;
+  padding: .42rem 1.5rem;
   border: none;
   border-radius: 6px;
   background: #c0392b;
@@ -291,5 +443,10 @@
     max-height: 95vh;
     border-radius: 16px 16px 0 0;
   }
-  .tabHint { display: none; }
+  .modeSwitch { display: none; }
+  .mode_split {
+    grid-template-columns: 1fr;
+  }
+  .splitLine { display: none; }
+  .mode_split .previewPane { display: none; }
 }
