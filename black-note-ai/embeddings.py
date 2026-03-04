@@ -1,3 +1,7 @@
+import os
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
 from langchain_core.embeddings import Embeddings
 from sentence_transformers import SentenceTransformer
 from typing import List

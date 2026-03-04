@@ -103,14 +103,19 @@ async def agent_task(req: AgentRequest):
             async for chunk in agent.astream(
                 {"messages": [HumanMessage(content=req.task)]}
             ):
-                # 只输出最终回答，过滤工具调用过程
-                if "messages" in chunk:
-                    msg = chunk["messages"][-1]
-                    if msg.type == "ai" and not getattr(msg, "tool_calls", None):
-                        if msg.content:
-                            yield f"data: {msg.content}\n\n"
+                # agent chunk：包含AI的思考和最终回答
+                if "agent" in chunk:
+                    msg = chunk["agent"]["messages"][-1]
+                    # 只输出有内容且不是工具调用的消息（最终回答）
+                    if msg.content and not getattr(msg, "tool_calls", None):
+                        yield f"data: {msg.content}\n\n"
+
+                # tools chunk：工具执行结果，跳过不输出给用户
+                # if "tools" in chunk: pass
+
             yield "data: [DONE]\n\n"
         except Exception as e:
+            print(f"Agent error: {e}")
             yield f"data: [ERROR] {str(e)}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
