@@ -5,6 +5,11 @@ from langchain_openai import ChatOpenAI
 from langchain.tools import tool       
 from langchain.agents import create_agent 
 from langchain.messages import SystemMessage, HumanMessage
+# 向量库
+from embeddings import BGEEmbeddings
+from langchain_chroma import Chroma
+from pydantic import BaseModel
+from langgraph.checkpoint.memory import InMemorySaver
 
 load_dotenv()
 CURRENT_USER_ID = 6
@@ -24,9 +29,6 @@ engine = create_engine(
     max_overflow=10,
 )
 
-# 向量库
-from embeddings import BGEEmbeddings
-from langchain_chroma import Chroma
 
 vectorstore = Chroma(
     persist_directory="../black-note-ai/chroma_db",
@@ -34,7 +36,6 @@ vectorstore = Chroma(
     collection_name="black_note_all"
 )
 
-# ✅ 官方文档写法：用 @tool 装饰器，函数有类型注解和 docstring
 @tool
 def search_notes(query: str) -> str:
     """根据语义搜索笔记，返回相关笔记的 ID 和标题列表。"""
@@ -87,22 +88,29 @@ def get_note_list(placeholder: str = "") -> str:
     except Exception as e:
         return f"查询失败：{e}"
 
+class ContactInfo(BaseModel):
+    name: str
+    email: str | None = None
+    phone: str | None = None
 
 # ✅ 官方文档写法：create_agent(model, tools=[], system_prompt="")
 agent = create_agent(
     llm,
     tools=[search_notes, get_note_detail, get_note_list],
-    system_prompt=SystemMessage(
-        content=[]
-    )
+    checkpointer=InMemorySaver()
 )
+config = {
+    "configurable":{"thread_id":1}
+}
 
-# ✅ 官方文档调用方式
-if __name__ == "__main__":
-    response = agent.invoke({
-        "messages": [
-            SystemMessage("你是一位我的研究助手，导师，好朋友"),
-            HumanMessage("请给给我一些学习上的建议"),
-        ]
-    })
-    print(response["messages"][-1].content )
+
+for chunk in agent.stream(
+    {"messages":[HumanMessage("你觉得我写的最好的是哪一篇笔记")]},
+    stream_mode="updates",
+    config=config
+):
+    for step, data in chunk.items():
+        print(f"step: {step}")
+        print(f"content: {data['messages'][-1].content_blocks}")
+        print()
+    

@@ -1,45 +1,53 @@
 import os
+from typing import Optional
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from langchain_openai import ChatOpenAI
-from langchain.tools import tool       
-from langchain.agents import create_agent 
-from langchain.messages import SystemMessage, HumanMessage
+from langchain.tools import tool
+from langchain.agents import create_agent
+from langchain.messages import SystemMessage
 
 load_dotenv()
-CURRENT_USER_ID = 6
 
-# LLM
-llm = ChatOpenAI(
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url=os.getenv("DEEPSEEK_BASE_URL"),
-    model=os.getenv("DEEPSEEK_MODEL"),
-    temperature=0.3,
-)
+# ── 由 FastAPI 注入的上下文（在 main.py 里通过 init_agent_context 设置） ──
+_VECTORSTORE = None
+_CURRENT_USER_ID: Optional[int] = None
 
-# 数据库连接池
+
+def init_agent_context(vectorstore, user_id: str) -> None:
+    """
+    由 FastAPI 在每次 /ai/agent 请求前调用：
+    - 注入全局 vectorstore
+    - 设置当前会话对应的 user_id
+    """
+    global _VECTORSTORE, _CURRENT_USER_ID
+    _VECTORSTORE = vectorstore
+    _CURRENT_USER_ID = int(user_id)
+    print(f"[Agent] 上下文已初始化：user_id={_CURRENT_USER_ID}")
+
+
+# ── 数据库连接池（全局复用） ───────────────────────────────
 engine = create_engine(
     "mysql+pymysql://root:123456@127.0.0.1/black_note",
     pool_size=5,
     max_overflow=10,
 )
 
-# 向量库
-from embeddings import BGEEmbeddings
-from langchain_chroma import Chroma
 
-vectorstore = Chroma(
-    persist_directory="../black-note-ai/chroma_db",
-    embedding_function=BGEEmbeddings(),
-    collection_name="black_note_all"
-)
+def _ensure_context():
+    if _VECTORSTORE is None or _CURRENT_USER_ID is None:
+        raise RuntimeError("Agent 上下文未初始化，请先调用 init_agent_context()")
 
-# ✅ 官方文档写法：用 @tool 装饰器，函数有类型注解和 docstring
+
 @tool
 def search_notes(query: str) -> str:
-    """根据语义搜索笔记，返回相关笔记的 ID 和标题列表。"""
-    docs = vectorstore.similarity_search_with_score(
-        query, 3, {"user_id": str(CURRENT_USER_ID)}
+    """根据语义搜索当前用户的笔记，返回相关笔记的 ID 和标题列表。"""
+    _ensure_context()
+    docs = _VECTORSTORE.similarity_search_with_score(
+        query,
+        k=3,
+        filter={"user_id": str(_CURRENT_USER_ID)},
     )
     if not docs:
         return "未找到相关笔记"
@@ -48,9 +56,11 @@ def search_notes(query: str) -> str:
         for doc, _ in docs
     )
 
+
 @tool
 def get_note_detail(note_id: str) -> str:
     """根据笔记 ID 获取笔记详情（标题、创建时间、内容）。请先用 search_notes 获取 ID。"""
+    _ensure_context()
     try:
         with engine.connect() as conn:
             result = conn.execute(
@@ -58,7 +68,7 @@ def get_note_detail(note_id: str) -> str:
                     "SELECT title, content, created_at FROM note "
                     "WHERE id = :id AND user_id = :user_id AND is_deleted = 0"
                 ),
-                {"id": note_id, "user_id": CURRENT_USER_ID}
+                {"id": note_id, "user_id": _CURRENT_USER_ID},
             )
             note = result.fetchone()
         if not note:
@@ -67,9 +77,11 @@ def get_note_detail(note_id: str) -> str:
     except Exception as e:
         return f"查询失败：{e}"
 
+
 @tool
-def get_note_list(placeholder: str = "") -> str:
+def get_note_list(_: str = "") -> str:
     """获取当前用户所有笔记的标题列表。"""
+    _ensure_context()
     try:
         with engine.connect() as conn:
             result = conn.execute(
@@ -78,31 +90,47 @@ def get_note_list(placeholder: str = "") -> str:
                     "WHERE user_id = :user_id AND is_deleted = 0 "
                     "ORDER BY created_at DESC"
                 ),
-                {"user_id": CURRENT_USER_ID}
+                {"user_id": _CURRENT_USER_ID},
             )
             notes = result.fetchall()
         if not notes:
             return "暂无笔记"
-        return "\n".join(f"ID: {n[0]} 标题: {n[1]} 时间: {n[2]}" for n in notes)
+        return "\n".join(
+            f"ID: {n[0]} 标题: {n[1]} 时间: {n[2]}" for n in notes
+        )
     except Exception as e:
         return f"查询失败：{e}"
 
 
-# ✅ 官方文档写法：create_agent(model, tools=[], system_prompt="")
-agent = create_agent(
-    llm,
-    tools=[search_notes, get_note_detail, get_note_list],
-    system_prompt=SystemMessage(
-        content=[]
+def build_agent():
+    """
+    构建一个 ReAct 风格的 Tool-Calling Agent：
+    - LLM 使用 DeepSeek（从环境变量读取 key / base_url / model）
+    - 工具有：search_notes / get_note_detail / get_note_list
+    - 返回值支持 astream，main.py 已按官方写法消费 chunk["agent"] / chunk["tools"]
+    """
+    llm = ChatOpenAI(
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL"),
+        model=os.getenv("DEEPSEEK_MODEL"),
+        temperature=0.3,
     )
-)
 
-# ✅ 官方文档调用方式
-if __name__ == "__main__":
-    response = agent.invoke({
-        "messages": [
-            SystemMessage("你是一位我的研究助手，导师，好朋友"),
-            HumanMessage("请给给我一些学习上的建议"),
-        ]
-    })
-    print(response["messages"][-1].content )
+    system_prompt = SystemMessage(
+        content=(
+            "你是用户的私人知识与写作助手，能够查看 TA 的所有笔记并进行：\n"
+            "1）根据需求搜索相关笔记\n"
+            "2）阅读某条笔记的详细内容\n"
+            "3）汇总、改写、生成新的内容\n"
+            "回答时要：\n"
+            "- 尽量引用具体笔记（ID/标题）\n"
+            "- 明确哪些是来自笔记的事实，哪些是你的推理或建议\n"
+            "- 语言自然、有条理，适合直接复制到笔记里使用。"
+        )
+    )
+
+    return create_agent(
+        llm=llm,
+        tools=[search_notes, get_note_detail, get_note_list],
+        system_prompt=system_prompt,
+    )
