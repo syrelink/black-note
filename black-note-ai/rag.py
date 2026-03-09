@@ -34,6 +34,7 @@ def build_rag_chain(vectorstore, user_id: str):
         streaming=True,
     )
 
+    print(f"当前检索用户ID: {user_id}")  # 加这行
     # 带user_id过滤的检索器
     retriever = vectorstore.as_retriever(
         search_kwargs={
@@ -68,7 +69,9 @@ def build_rag_chain(vectorstore, user_id: str):
 
     def format_docs(docs):
         if not docs:
+            print("⚠️ 召回结果为空！")
             return "（无相关笔记）"
+        print(f"✅ 召回 {len(docs)} 条笔记: {[d.metadata['title'] for d in docs]}")
         return "\n\n".join(
             f"【笔记{i}】标题：{doc.metadata['title']}\n{doc.page_content.strip()}"
             for i, doc in enumerate(docs, 1)

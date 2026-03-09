@@ -3,6 +3,7 @@ package com.syr.service.Impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.syr.client.AiClient;
 import com.syr.exception.BusinessException;
 import com.syr.dto.NotePublishDTO;
 import com.syr.entity.Note;
@@ -38,6 +39,8 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
     private final RabbitTemplate      rabbitTemplate;
     private final UserMapper          userMapper;   // ← 新增，用于查询作者信息
 
+    private final AiClient aiClient;  // 新增这一行
+
     @Override
     public void publish(NotePublishDTO dto) {
         Long userId = UserHolder.getUserId();
@@ -52,6 +55,8 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
         }
         save(note);
         rabbitTemplate.convertAndSend(RabbitMQConfig.FEED_EXCHANGE, RabbitMQConfig.FEED_PUSH_KEY, note.getId());
+        // 新增：异步同步到向量库
+        aiClient.syncNote(note.getId());
     }
 
     @Override
@@ -106,6 +111,9 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
             log.error("删除缓存失败，发MQ补偿，key={}", key, e);
             rabbitTemplate.convertAndSend(RabbitMQConfig.CACHE_EXCHANGE, RabbitMQConfig.CACHE_DELETE_KEY, key);
         }
+
+        // 新增：从向量库删除
+        aiClient.deleteNote(id);
     }
 
     @Override

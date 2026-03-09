@@ -112,3 +112,32 @@
   font-weight: 500;
   color: var(--ink);
 }
+/* ── AI助手两栏布局 ── */
+.layout {
+  display: flex;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+  align-items: flex-start;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  height: calc(100vh - 120px);
+  position: sticky;
+  top: 120px;
+  border-left: 1px solid #f0f0f0;
+}
+
+/* 移动端隐藏侧边栏 */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+}

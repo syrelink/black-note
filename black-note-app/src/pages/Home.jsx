@@ -8,11 +8,12 @@ import Masonry from '../components/Masonry'
 import NoteDetail from '../components/NoteDetail'
 import PublishModal from '../components/PublishModal'
 import LoginModal from '../components/LoginModal'
+import AiChat from '../components/AiChat'
 import styles from './Home.module.css'
 
 export default function Home() {
-  const { isLogin , userId: myId}  = useAuth()
-  const navigate     = useNavigate()
+  const { isLogin, userId: myId } = useAuth()
+  const navigate = useNavigate()
 
   const [tab,         setTab]         = useState('discover')
   const [notes,       setNotes]       = useState([])
@@ -42,14 +43,12 @@ export default function Home() {
     setLoading(true)
 
     try {
-      // 关注 Tab：拉取关注的人列表
       if (tab === 'follow' && isLogin) {
         const res = await followApi.followList(myId)
         setFollowUsers(res.data || [])
         return
       }
 
-      // 发现 Tab：拉取笔记列表
       const page = reset ? 1 : discoverPageRef.current
       const res  = await noteApi.noteList(page, 20)
       const list = res.data || []
@@ -70,7 +69,6 @@ export default function Home() {
       hasMoreRef.current = more
 
     } catch {
-      if (reset) setNotes(MOCK)
       setHasMore(false)
       hasMoreRef.current = false
     } finally {
@@ -79,7 +77,7 @@ export default function Home() {
     }
   }, [tab, isLogin])
 
-  // 点赞处理
+  // ── 点赞 ──
   const handleLike = async (noteId) => {
     if (!isLogin) return
     await noteApi.like(noteId)
@@ -183,69 +181,77 @@ export default function Home() {
         }
       </div>
 
-      <main className={styles.main}>
+      {/* 主体两栏布局 */}
+      <div className={styles.layout}>
 
-        {/* ── 关注 Tab：展示关注的人列表 ── */}
-        {tab === 'follow' && !loading && (
-          followUsers.length === 0 ? (
-            <div className={styles.empty}>
-              <div className={styles.emptyIcon}>👥</div>
-              <p>还没有关注任何人，去发现更多吧</p>
-            </div>
-          ) : (
-            <div className={styles.followList}>
-              {followUsers.map(user => (
-                <div
-                  key={user.id}
-                  className={styles.followItem}
-                  onClick={() => navigate(`/user/${user.id}`)}
-                >
-                  <div className={styles.followAvatar}>
-                    {user.avatar
-                      ? <img src={user.avatar} alt={user.nickname} />
-                      : <span>{(user.nickname || user.username)?.charAt(0)}</span>
-                    }
+        <main className={styles.main}>
+
+          {/* 关注 Tab */}
+          {tab === 'follow' && !loading && (
+            followUsers.length === 0 ? (
+              <div className={styles.empty}>
+                <div className={styles.emptyIcon}>👥</div>
+                <p>还没有关注任何人，去发现更多吧</p>
+              </div>
+            ) : (
+              <div className={styles.followList}>
+                {followUsers.map(user => (
+                  <div
+                    key={user.id}
+                    className={styles.followItem}
+                    onClick={() => navigate(`/user/${user.id}`)}
+                  >
+                    <div className={styles.followAvatar}>
+                      {user.avatar
+                        ? <img src={user.avatar} alt={user.nickname} />
+                        : <span>{(user.nickname || user.username)?.charAt(0)}</span>
+                      }
+                    </div>
+                    <span className={styles.followName}>
+                      {user.nickname || user.username}
+                    </span>
                   </div>
-                  <span className={styles.followName}>
-                    {user.nickname || user.username}
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
+            )
+          )}
+
+          {/* 发现 Tab：瀑布流 */}
+          {tab === 'discover' && displayNotes.length > 0 && (
+            <Masonry
+              notes={displayNotes}
+              onCardClick={setActiveNote}
+              onLike={handleLike}
+              likeMap={likeMap}
+            />
+          )}
+
+          {tab === 'discover' && !loading && displayNotes.length === 0 && (
+            <div className={styles.empty}>
+              <div className={styles.emptyIcon}>📖</div>
+              <p>暂无笔记</p>
             </div>
-          )
-        )}
+          )}
 
-        {/* ── 发现 Tab：笔记瀑布流 ── */}
-        {tab === 'discover' && displayNotes.length > 0 && (
-          <Masonry
-            notes={displayNotes}
-            onCardClick={setActiveNote}
-            onLike={handleLike}
-            likeMap={likeMap}
-          />
-        )}
+          {loading && !refreshing && (
+            <div className={styles.bottomLoading}>
+              <div className={styles.spinner} />
+              <span>加载中...</span>
+            </div>
+          )}
 
-        {tab === 'discover' && !loading && displayNotes.length === 0 && (
-          <div className={styles.empty}>
-            <div className={styles.emptyIcon}>📖</div>
-            <p>暂无笔记</p>
-          </div>
-        )}
+          {tab === 'discover' && !hasMore && !loading && notes.length > 0 && (
+            <div className={styles.noMore}>— 已经到底了 —</div>
+          )}
 
-        {/* 加载中 */}
-        {loading && !refreshing && (
-          <div className={styles.bottomLoading}>
-            <div className={styles.spinner} />
-            <span>加载中...</span>
-          </div>
-        )}
+        </main>
 
-        {/* 没有更多 */}
-        {tab === 'discover' && !hasMore && !loading && notes.length > 0 && (
-          <div className={styles.noMore}>— 已经到底了 —</div>
-        )}
+        {/* 右侧 AI 助手 */}
+        <aside className={styles.sidebar}>
+          <AiChat userId={myId} />
+        </aside>
 
-      </main>
+      </div>
 
       {activeNote && (
         <NoteDetail
@@ -253,7 +259,7 @@ export default function Home() {
           onClose={() => setActiveNote(null)}
           onLike={handleLike}
           likeMap={likeMap}
-          onDeleted={() => {                              // 加这个
+          onDeleted={() => {
             setNotes(prev => prev.filter(n => n.id !== activeNote.id))
             setActiveNote(null)
           }}
