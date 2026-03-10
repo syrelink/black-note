@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+
+langchain
+langchain-openai
+langchain-chroma
+
+chromadb
+sentence-transformers
+
+pymysql
+SQLAlchemy
+
+redis

@@ -22,7 +22,6 @@ public class TokenInterceptor implements HandlerInterceptor {
                              HttpServletResponse response,
                              Object handler) {
         String token = request.getHeader("Authorization");
-        log.info("收到token: {}", token); // 加这行
 
         if (token == null || token.isBlank()) return true;
 
