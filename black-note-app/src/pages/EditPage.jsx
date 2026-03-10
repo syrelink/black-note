@@ -72,7 +72,6 @@ export default function EditPage() {
 
   const [title,            setTitle]           = useState('')
   const [content,          setContent]         = useState('')
-  const [images,           setImages]          = useState([])
   const [uploading,        setUploading]       = useState(false)
   const [submitting,       setSubmitting]      = useState(false)
   const [loading,          setLoading]         = useState(true)
@@ -95,13 +94,12 @@ export default function EditPage() {
         const note = res.data
         setTitle(note.title || '')
         setContent(note.content || '')
-        setImages(note.images || [])
       })
       .catch(() => setMsg('加载失败'))
       .finally(() => setLoading(false))
   }, [id])
 
-  // ★ 切换模式：重置滚动 + 修正 textarea overflow/height
+  // 切换模式：重置滚动 + 修正 textarea overflow/height
   useEffect(() => {
     if (editPaneRef.current) editPaneRef.current.scrollTop = 0
     if (previewRef.current)  previewRef.current.scrollTop  = 0
@@ -183,29 +181,45 @@ export default function EditPage() {
     setTimeout(() => { e.target.selectionStart = e.target.selectionEnd = s + 2 }, 0)
   }
 
-  const handleFile = async (e) => {
-    const files = Array.from(e.target.files)
-    if (!files.length) return
+  // 上传图片并在光标处插入 markdown img 语法
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
     setUploading(true)
     try {
-      const urls = await Promise.all(files.map(f => fileApi.upload(f).then(r => r.data)))
-      setImages(prev => [...prev, ...urls])
-    } catch { setMsg('图片上传失败') }
-    finally  { setUploading(false) }
+      const url = await fileApi.upload(file).then(r => r.data)
+      const ta  = textareaRef.current
+      const start = ta ? ta.selectionStart : content.length
+      const imgMd = `![图片](${url})`
+      const newContent = content.substring(0, start) + imgMd + content.substring(start)
+      setContent(newContent)
+      setTimeout(() => {
+        if (ta) {
+          ta.selectionStart = ta.selectionEnd = start + imgMd.length
+          ta.focus()
+        }
+      }, 0)
+    } catch {
+      setMsg('图片上传失败')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
   }
-
-  const removeImage = (idx) => setImages(prev => prev.filter((_, i) => i !== idx))
 
   const handleSubmit = async () => {
     if (!title.trim())   { setMsg('标题不能为空'); return }
     if (!content.trim()) { setMsg('内容不能为空'); return }
     setSubmitting(true); setMsg('')
     try {
-      await noteApi.updateNote(id, { title, content, images })
+      await noteApi.updateNote(id, { title, content, images: [] })
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    } catch { setMsg('保存失败，请重试') }
-    finally  { setSubmitting(false) }
+      setTimeout(() => setSaved(false), 2000)  // 留在编辑页，2秒后恢复按钮
+    } catch {
+      setMsg('保存失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (loading) return <div className={styles.loading}><div className={styles.spinner} /></div>
@@ -237,6 +251,15 @@ export default function EditPage() {
               ⇅ {syncScroll ? '同步' : '独立'}
             </button>
           )}
+          <label className={styles.toolbarBtn}>
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleImageUpload}
+            />
+            {uploading ? '上传中...' : '🖼 插入图片'}
+          </label>
           <button
             className={`${styles.btnSave} ${saved ? styles.btnSaved : ''}`}
             onClick={handleSubmit} disabled={submitting}
@@ -276,7 +299,7 @@ export default function EditPage() {
                   value={content}
                   onChange={e => setContent(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={`开始写作...\n\n支持 Markdown + LaTeX：\n# 一级标题\n**粗体**  *斜体*  \`代码\`\n- 列表\n> 引用\n$E=mc^2$`}
+                  placeholder={`开始写作...\n\n支持 Markdown + LaTeX：\n# 一级标题\n**粗体**  *斜体*  \`代码\`\n- 列表\n> 引用\n$E=mc^2$\n\n插入图片：点击右上角"🖼 插入图片"按钮`}
                 />
               </div>
             )}
@@ -293,31 +316,6 @@ export default function EditPage() {
               </div>
             )}
           </div>
-
-          {!isSplit && (
-            <div className={styles.imageSection}>
-              <div className={styles.imageSectionTitle}>
-                <span>配图</span><span className={styles.imageHint}>支持多张</span>
-              </div>
-              <label className={styles.uploadArea}>
-                <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFile} />
-                {uploading
-                  ? <span className={styles.uploadingText}>上传中...</span>
-                  : <span className={styles.uploadText}><span className={styles.uploadIcon}>+</span> 点击添加图片</span>
-                }
-              </label>
-              {images.length > 0 && (
-                <div className={styles.imageGrid}>
-                  {images.map((url, i) => (
-                    <div key={i} className={styles.imageItem}>
-                      <img src={url} alt="" />
-                      <button className={styles.imageRemove} onClick={() => removeImage(i)}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {msg && <div className={styles.msg}>{msg}</div>}
         </div>

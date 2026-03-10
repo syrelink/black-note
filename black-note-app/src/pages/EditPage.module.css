@@ -279,3 +279,26 @@
   .mode_split .previewWrapperSplit { display: none; }
   .editPaneSplit { height: auto; overflow-y: visible !important; padding-right: 0; }
 }
+.toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #eee;
+    background: #fafafa;
+}
+
+.toolbarBtn {
+    padding: 4px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    background: white;
+    color: #555;
+    transition: all 0.2s;
+}
+
+.toolbarBtn:hover {
+    border-color: #999;
+    color: #333;
+}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { noteApi, followApi } from '../api'
 import { useAuth } from '../hooks/useAuth'
+import { useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import SearchBar from '../components/SearchBar'
 import Masonry from '../components/Masonry'
@@ -14,7 +15,7 @@ import styles from './Home.module.css'
 export default function Home() {
   const { isLogin, userId: myId } = useAuth()
   const navigate = useNavigate()
-
+  const location = useLocation()
   const [tab,         setTab]         = useState('discover')
   const [notes,       setNotes]       = useState([])
   const [followUsers, setFollowUsers] = useState([])
@@ -98,6 +99,14 @@ export default function Home() {
     loadNotes(true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, isLogin])
+
+  useEffect(() => {
+    if (location.state?.refresh) {
+        discoverPageRef.current = 1
+        hasMoreRef.current = true
+        loadNotes(true)
+    }
+  }, [location.state?.refresh])
 
   // 无限滚动
   useEffect(() => {

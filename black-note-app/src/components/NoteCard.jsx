@@ -32,16 +32,6 @@ export default function NoteCard({ note, onClick, index , onLike, likeMap}) {
       style={{ animationDelay: `${index * 0.04}s` }}
       onClick={() => onClick(note)}
     >
-      {hasImg && (
-        <img
-          className={styles.img}
-          src={note.images[0]}
-          alt={note.title}
-          loading="lazy"
-          onError={() => setImgErr(true)}
-        />
-      )}
-
       <div className={styles.body}>
         <div className={styles.title}>{note.title}</div>
         <div className={styles.excerpt} 

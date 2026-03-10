@@ -37,7 +37,7 @@ class BGEEmbeddings(Embeddings):
 
 # ── 从MySQL读取笔记 ───────────────────────────────
 def load_notes_from_mysql():
-    print("\n【步骤1】从MySQL读取笔记...")
+    print("\n从MySQL读取笔记...")
     conn = pymysql.connect(
         host="127.0.0.1", port=3306,
         user="root", password="123456",
@@ -64,7 +64,7 @@ def load_notes_from_mysql():
 
 # ── 转成Document格式 ──────────────────────────────
 def notes_to_documents(notes):
-    print("\n【步骤2】转换为Document格式...")
+    print("\n转换为Document格式...")
     docs = []
     for note in notes:
         content = f"{note['title']}\n{note['content']}"
@@ -85,7 +85,7 @@ def notes_to_documents(notes):
 
 # ── 存入ChromaDB ──────────────────────────────────
 def store_to_chroma(docs, embeddings):
-    print("\n【步骤3】批量向量化并存入ChromaDB...")
+    print("\n批量向量化并存入ChromaDB...")
 
     client = chromadb.PersistentClient(path="./chroma_db")
 
@@ -93,9 +93,9 @@ def store_to_chroma(docs, embeddings):
     existing = [c.name for c in client.list_collections()]
     if "black_note_all" in existing:
         client.delete_collection("black_note_all")
-        print("🗑️  已清空旧数据")
+        print("已清空旧数据")
     else:
-        print("📂 无旧数据，直接创建")
+        print("无旧数据，直接创建")
 
     vectorstore = Chroma.from_documents(
         documents=docs,
@@ -109,25 +109,20 @@ def store_to_chroma(docs, embeddings):
 
 # ── 语义搜索测试 ──────────────────────────────────
 def test_search(vectorstore):
-    print("\n【步骤4】测试语义搜索...")
+    print("\n【测试语义搜索...")
     queries = ["心情不好", "技术学习", "美食推荐", "旅行"]
 
     for query in queries:
         results = vectorstore.similarity_search_with_score(query, k=3)
-        print(f"\n🔍 搜索「{query}」原始分数：")
+        print(f"\n搜索「{query}」原始分数：")
         for doc, score in results:
             print(f"   score:{score:.4f} similarity:{1-score:.4f} [{doc.metadata['title']}]")
 
 
 # ── 主入口 ────────────────────────────────────────
 if __name__ == "__main__":
-    embeddings  = BGEEmbeddings()
     notes       = load_notes_from_mysql()
-
-    if not notes:
-        print("⚠️  数据库没有笔记，请先发几条笔记再运行")
-        exit()
-
     docs        = notes_to_documents(notes)
+    embeddings  = BGEEmbeddings()
     vectorstore = store_to_chroma(docs, embeddings)
     test_search(vectorstore)
