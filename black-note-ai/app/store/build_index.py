@@ -1,19 +1,18 @@
 """
+入库：读取原始笔数据 -> 转成 Document 对象  -> 定义嵌入向量模型 -> 保存向量库中
 一次性全量建库脚本：
 - 从 MySQL 读取全部未删除笔记
 - 向量化后写入 ChromaDB（会清空旧 collection）
 """
 
 import os
-
 import chromadb
 import pymysql
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-
 from app.store.embeddings import BGEEmbeddings
 
-
+# 读取原始笔记
 def load_notes_from_mysql():
     conn = pymysql.connect(
         host=os.getenv("MYSQL_HOST", "127.0.0.1"),
@@ -41,7 +40,7 @@ def load_notes_from_mysql():
     finally:
         conn.close()
 
-
+# 转成 Document 对象
 def notes_to_documents(notes):
     docs = []
     for note in notes:
@@ -61,6 +60,7 @@ def notes_to_documents(notes):
     return docs
 
 
+# 用 BGEEmbeddings 生成向量，存入 ChromaDB
 def store_to_chroma(docs, embeddings):
     chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
     collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")

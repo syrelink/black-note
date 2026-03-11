@@ -16,7 +16,7 @@ class BGEEmbeddings(Embeddings):
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            print("⏳ 加载 bge-m3 模型（首次加载约10秒）...")
+            print("⏳ 加载 bge-m3 模型）...")
             cls._instance.model = SentenceTransformer("BAAI/bge-m3", device="cpu")
             print("✅ bge-m3 加载成功")
         return cls._instance

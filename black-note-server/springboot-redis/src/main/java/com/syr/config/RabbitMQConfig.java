@@ -27,6 +27,11 @@ public class RabbitMQConfig {
     public static final String CACHE_DELETE_QUEUE = "cache.delete.queue";
     public static final String CACHE_DELETE_KEY   = "cache.delete";
 
+    // rag笔记同步队列
+    public static final String NOTE_SYNC_QUEUE    = "note.sync.queue";
+    public static final String NOTE_SYNC_EXCHANGE = "note.sync.exchange";
+    public static final String NOTE_SYNC_KEY      = "note.sync";
+
     // Exchange
     @Bean public DirectExchange likeExchange()  { return new DirectExchange(LIKE_EXCHANGE);  }
     @Bean public DirectExchange feedExchange()  { return new DirectExchange(FEED_EXCHANGE);  }
@@ -60,5 +65,24 @@ public class RabbitMQConfig {
     @Bean
     public MessageConverter messageConverter() {
         return new Jackson2JsonMessageConverter();
+    }
+
+    // 笔记同步
+    @Bean
+    public Queue noteSyncQueue() {
+        return new Queue(NOTE_SYNC_QUEUE, true); // true = 持久化
+    }
+
+    @Bean
+    public DirectExchange noteSyncExchange() {
+        return new DirectExchange(NOTE_SYNC_EXCHANGE);
+    }
+
+    @Bean
+    public Binding noteSyncBinding() {
+        return BindingBuilder
+                .bind(noteSyncQueue())
+                .to(noteSyncExchange())
+                .with(NOTE_SYNC_KEY);
     }
 }

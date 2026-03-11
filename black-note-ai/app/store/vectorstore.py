@@ -70,7 +70,6 @@ def sync_single_note(note_id: int) -> bool:
                 "created_at": str(note["created_at"]),
             },
         )
-
         vectorstore = get_vectorstore()
         vectorstore.add_documents([doc])
         print(f"✅ 笔记 {note_id} 已同步入库")

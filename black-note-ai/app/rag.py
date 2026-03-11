@@ -1,3 +1,5 @@
+
+
 import os
 from typing import Dict
 
@@ -26,7 +28,6 @@ def get_session_history(session_id: str) -> BaseChatMessageHistory:
 
 def build_rag_chain(vectorstore, user_id: str):
     """带历史感知 + user_id 过滤的 RAG chain。"""
-
     llm = ChatOpenAI(
         api_key=os.getenv("DEEPSEEK_API_KEY"),
         base_url=os.getenv("DEEPSEEK_BASE_URL"),
@@ -37,10 +38,20 @@ def build_rag_chain(vectorstore, user_id: str):
 
     retriever = vectorstore.as_retriever(
         search_kwargs={
-            "k": 3,
+            "k": 5,
             "filter": {"user_id": user_id},
         }
     )
+
+    def format_docs(docs):
+        formatted = []
+        for i, doc in enumerate(docs, 1):
+            formatted.append(
+                f"【笔记{i}】标题：{doc.metadata['title']}\n"
+                f"作者：{doc.metadata['author']}\n"
+                f"内容：{doc.page_content}\n"
+            )
+        return "\n".join(formatted)
 
     contextualize_prompt = ChatPromptTemplate.from_messages(
         [
@@ -61,7 +72,7 @@ def build_rag_chain(vectorstore, user_id: str):
                 "system",
                 "你是用户的私人笔记助手。\n"
                 "规则：\n"
-                "1. 严格基于下方笔记内容回答\n"
+                "1. 基于下方笔记内容回答\n"
                 "2. 没有相关内容时说'您的笔记中暂无相关内容'\n"
                 "3. 回答时注明来自哪篇笔记\n"
                 "4. 语言简洁自然\n\n"
@@ -71,14 +82,6 @@ def build_rag_chain(vectorstore, user_id: str):
             ("human", "{input}"),
         ]
     )
-
-    def format_docs(docs):
-        if not docs:
-            return "（无相关笔记）"
-        return "\n\n".join(
-            f"【笔记{i}】标题：{doc.metadata.get('title', '')}\n{doc.page_content.strip()}"
-            for i, doc in enumerate(docs, 1)
-        )
 
     history_aware_retriever = (
         contextualize_prompt

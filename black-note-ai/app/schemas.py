@@ -8,13 +8,6 @@ class ChatRequest(BaseModel):
 
 class AgentRequest(BaseModel):
     task: str
-    user_id: str
+    reset: bool = False
 
-
-class SyncRequest(BaseModel):
-    note_id: int
-
-
-class DeleteRequest(BaseModel):
-    note_id: int
 
