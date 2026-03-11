@@ -1,3 +1,9 @@
+"""
+增量同步模块：
+新笔记发布/删除时，同步更新 ChromaDB，无需全量重建。
+同样遵循 RAG 入库流程：Load → Split → Embed → Store
+"""
+
 import os
 from typing import Optional
 
@@ -5,6 +11,7 @@ import chromadb
 import pymysql
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .embeddings import BGEEmbeddings
 
@@ -21,9 +28,16 @@ DB_CONFIG = {
     "charset": "utf8mb4",
 }
 
+# ── Step 2: Split（与 build_index.py 保持一致）────────────────────────────────
+_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=50,
+    length_function=len,
+)
+
 
 def get_vectorstore() -> Chroma:
-    """加载已有 ChromaDB（不全量重建）。"""
+    """Step 4: Store — 加载已有 ChromaDB，不全量重建。"""
     embeddings = BGEEmbeddings()
     return Chroma(
         persist_directory=CHROMA_DIR,
@@ -33,6 +47,7 @@ def get_vectorstore() -> Chroma:
 
 
 def _fetch_note(note_id: int) -> Optional[dict]:
+    """Step 1: Load — 从 MySQL 查单条笔记。"""
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
@@ -53,12 +68,17 @@ def _fetch_note(note_id: int) -> Optional[dict]:
 
 
 def sync_single_note(note_id: int) -> bool:
-    """增量同步单条笔记到向量库（SpringBoot 发布后调用）。"""
+    """
+    增量同步单条笔记：Load → Split → Embed → Store
+    RabbitMQ 消费者收到消息后调用。
+    """
     try:
+        # Step 1: Load
         note = _fetch_note(note_id)
         if not note:
             return False
 
+        # Step 1 → Step 2 准备：转成 Document
         doc = Document(
             page_content=f"{note['title']}\n{note['content']}",
             metadata={
@@ -70,9 +90,14 @@ def sync_single_note(note_id: int) -> bool:
                 "created_at": str(note["created_at"]),
             },
         )
+
+        # Step 2: Split — 与全量建库保持一致的分块策略
+        chunks = _splitter.split_documents([doc])
+
+        # Step 3 + 4: Embed + Store
         vectorstore = get_vectorstore()
-        vectorstore.add_documents([doc])
-        print(f"✅ 笔记 {note_id} 已同步入库")
+        vectorstore.add_documents(chunks)
+        print(f"✅ 笔记 {note_id} 已同步入库（{len(chunks)} 个 chunk）")
         return True
     except Exception as e:
         print(f"❌ 同步失败：{e}")
@@ -80,7 +105,7 @@ def sync_single_note(note_id: int) -> bool:
 
 
 def delete_note_from_vectorstore(note_id: int) -> bool:
-    """按 note_id 从 ChromaDB 移除（SpringBoot 删除后调用）。"""
+    """从 ChromaDB 删除指定笔记的所有 chunk（按 note_id 过滤）。"""
     try:
         client = chromadb.PersistentClient(path=CHROMA_DIR)
         collection = client.get_collection(COLLECTION_NAME)
@@ -90,4 +115,3 @@ def delete_note_from_vectorstore(note_id: int) -> bool:
     except Exception as e:
         print(f"❌ 删除失败：{e}")
         return False
-

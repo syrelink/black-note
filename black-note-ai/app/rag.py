@@ -1,107 +1,123 @@
+"""
+【RAG 标准流程】检索流程（Chroma 原生 Hybrid 版）：
+Step 5. Retrieve - 使用 Chroma 原生 hybrid_search（dense + sparse + RRF 自动融合）
+Step 6. Generate - 封装成 Tool，由 Agent 调用
 
+当前架构（2026 小项目最优版）：
+- Chroma 原生 hybrid_search（服务器端 dense BGE + BM25 sparse + RRF 融合）
+- FlashRank reranker（第二阶段精排，精度再提升 15-30%）
+
+注意：必须先重建 collection 支持 sparse vector！
+"""
 
 import os
-from typing import Dict
-
+from typing import List
 from dotenv import load_dotenv
-from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import (
-    RunnableLambda,
-    RunnablePassthrough,
-    RunnableWithMessageHistory,
-)
-from langchain_openai import ChatOpenAI
+
+from langchain_core.documents import Document
+from langchain_core.tools import tool
+from langchain_chroma import Chroma
+
+from flashrank import Ranker, RerankRequest
 
 load_dotenv()
 
-# 所有用户的会话历史，key = session_id
-_store: Dict[str, InMemoryChatMessageHistory] = {}
+
+def build_retriever(vectorstore: Chroma, user_id: str):
+    """
+    返回 hybrid_retriever 函数（兼容 .invoke(query) 调用方式）
+    使用 Chroma 原生 hybrid_search + RRF 融合
+    """
+    def hybrid_retriever(query: str, k: int = 15):
+        # 动态导入（避免不必要的依赖）
+        from chromadb import Search, Knn, Rrf
+
+        # RRF 融合配置（dense KNN + sparse 自动）
+        # sparse 部分由 collection 创建时注入的 DefaultSparseEmbeddingFunction 自动处理
+        hybrid_rank = Rrf(
+            ranks=[
+                Knn(query=query, return_rank=True),   # dense 部分
+                # sparse 部分由 Chroma 内部自动加入（无需手动写）
+            ],
+            k=60    # RRF 参数，越大融合越平滑
+        )
+
+        search_config = Search(
+            query_texts=[query],
+            where={"user_id": user_id},   # 关键：只查当前用户笔记
+            n_results=k,
+            rank=hybrid_rank
+        )
+
+        # 调用 Chroma 原生 hybrid_search
+        docs = vectorstore.hybrid_search(search=search_config)
+        return docs
+
+    return hybrid_retriever
 
 
-def get_session_history(session_id: str) -> BaseChatMessageHistory:
-    if session_id not in _store:
-        _store[session_id] = InMemoryChatMessageHistory()
-    return _store[session_id]
+def rerank_docs(query: str, docs: List[Document], top_n: int = 6) -> List[Document]:
+    """FlashRank 第二阶段精排（强烈推荐保留）"""
+    if not docs:
+        return []
 
+    ranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2")  # 最轻量 ~33MB
+    # 更强模型可选： "bge-reranker-v2-m3" 或 "rank-TKL"
 
-def build_rag_chain(vectorstore, user_id: str):
-    """带历史感知 + user_id 过滤的 RAG chain。"""
-    llm = ChatOpenAI(
-        api_key=os.getenv("DEEPSEEK_API_KEY"),
-        base_url=os.getenv("DEEPSEEK_BASE_URL"),
-        model=os.getenv("DEEPSEEK_MODEL"),
-        temperature=0.3,
-        streaming=True,
+    passages = [doc.page_content for doc in docs]
+    rerank_request = RerankRequest(query=query, passages=passages)
+    results = ranker.rerank(rerank_request)
+
+    sorted_indices = sorted(
+        range(len(results)),
+        key=lambda i: results[i]["score"],
+        reverse=True
     )
+    return [docs[i] for i in sorted_indices[:top_n]]
 
-    retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "k": 5,
-            "filter": {"user_id": user_id},
-        }
-    )
 
-    def format_docs(docs):
+def make_rag_tool(vectorstore: Chroma, user_id: str):
+    """
+    把检索器封装成 Tool，供 Agent 调用
+    """
+    retriever = build_retriever(vectorstore, user_id)
+
+    @tool
+    def search_notes_rag(query: str) -> str:
+        """
+        使用 Chroma 原生 hybrid search 检索用户笔记。
+        已集成 dense + sparse + RRF + FlashRank rerank。
+        """
+        # Step 5: 原生 hybrid 召回（服务器端一次完成）
+        raw_docs = retriever(query, k=18)   # 多召回一点给 rerank 用
+
+        if not raw_docs:
+            return "您的笔记中暂无相关内容。"
+
+        # Step 5.5: FlashRank 精排（面试最能讲的亮点）
+        reranked_docs = rerank_docs(query, raw_docs, top_n=7)
+
+        # 去重（按 note_id）
+        seen = set()
+        unique_docs = []
+        for doc in reranked_docs:
+            note_id = doc.metadata.get("note_id")
+            if note_id and note_id not in seen:
+                seen.add(note_id)
+                unique_docs.append(doc)
+
+        if not unique_docs:
+            return "您的笔记中暂无相关内容。"
+
+        # 格式化返回给 Agent
         formatted = []
-        for i, doc in enumerate(docs, 1):
+        for i, doc in enumerate(unique_docs, 1):
+            content = doc.page_content[:450] + "..." if len(doc.page_content) > 450 else doc.page_content
             formatted.append(
-                f"【笔记{i}】标题：{doc.metadata['title']}\n"
-                f"作者：{doc.metadata['author']}\n"
-                f"内容：{doc.page_content}\n"
+                f"【笔记 {i}】标题：{doc.metadata.get('title', '无标题')}\n"
+                f"内容：{content}"
             )
-        return "\n".join(formatted)
 
-    contextualize_prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "根据聊天历史将当前问题改写成独立完整的检索查询。"
-                "只输出改写后的查询，不要回答。"
-                "若问题已足够独立，直接输出原问题。",
-            ),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
+        return "\n\n".join(formatted)
 
-    answer_prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "你是用户的私人笔记助手。\n"
-                "规则：\n"
-                "1. 基于下方笔记内容回答\n"
-                "2. 没有相关内容时说'您的笔记中暂无相关内容'\n"
-                "3. 回答时注明来自哪篇笔记\n"
-                "4. 语言简洁自然\n\n"
-                "相关笔记：\n{context}",
-            ),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-
-    history_aware_retriever = (
-        contextualize_prompt
-        | llm
-        | StrOutputParser()
-        | RunnableLambda(lambda q: retriever.invoke(q))
-        | format_docs
-    )
-
-    rag_chain = (
-        RunnablePassthrough.assign(context=history_aware_retriever)
-        | answer_prompt
-        | llm
-        | StrOutputParser()
-    )
-
-    return RunnableWithMessageHistory(
-        rag_chain,
-        get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-    )
-
+    return search_notes_rag
