@@ -20,14 +20,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import com.syr.utils.SystemConstants;
 import com.syr.config.RabbitMQConfig;
+import org.springframework.web.client.RestTemplate;
 
 @Slf4j
 @Service
@@ -38,7 +36,22 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
     private final RabbitTemplate      rabbitTemplate;
     private final UserMapper          userMapper;   // ← 新增，用于查询作者信息
 
+    private final RestTemplate restTemplate;
+    // ====================== 同步到向量库（HTTP 回调） ======================
+    private void syncToVector(Long noteId, String action) {
+        String url = "http://localhost:8001/internal/sync-note";   // ← 改成你的 Python 服务地址
 
+        Map<String, Object> body = new HashMap<>();
+        body.put("note_id", noteId);
+        body.put("action", action);
+
+        try {
+            restTemplate.postForObject(url, body, String.class);
+            log.info("向量同步成功 noteId: {}, action: {}", noteId, action);
+        } catch (Exception e) {
+            log.error("向量同步失败 noteId: {}, action: {}", noteId, action, e);
+        }
+    }
     @Override
     public void publish(NotePublishDTO dto) {
         Long userId = UserHolder.getUserId();
@@ -53,8 +66,8 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
         }
         save(note);
         rabbitTemplate.convertAndSend(RabbitMQConfig.FEED_EXCHANGE, RabbitMQConfig.FEED_PUSH_KEY, note.getId());
-        // 新增：异步同步到向量库
-        rabbitTemplate.convertAndSend(RabbitMQConfig.NOTE_SYNC_EXCHANGE, RabbitMQConfig.NOTE_SYNC_KEY, note.getId().toString());
+        // 异步同步到向量库
+        syncToVector(note.getId(), "sync");
     }
 
     @Override
@@ -109,8 +122,8 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
             log.error("删除缓存失败，发MQ补偿，key={}", key, e);
             rabbitTemplate.convertAndSend(RabbitMQConfig.CACHE_EXCHANGE, RabbitMQConfig.CACHE_DELETE_KEY, key);
         }
-        // 新增：从向量库删除
-        rabbitTemplate.convertAndSend(RabbitMQConfig.NOTE_SYNC_EXCHANGE, RabbitMQConfig.NOTE_SYNC_KEY, "-" + id);
+        // 新增：从向量库删除（HTTP 回调方式）
+        syncToVector(id, "delete");
     }
 
     @Override
@@ -212,6 +225,8 @@ public class NoteServiceImpl extends ServiceImpl<NoteMapper, Note> implements No
             log.error("删除缓存失败，key={}", key, e);
             rabbitTemplate.convertAndSend(RabbitMQConfig.CACHE_EXCHANGE, RabbitMQConfig.CACHE_DELETE_KEY, key);
         }
+        // 更新向量库
+        syncToVector(id, "sync");
     }
 
     /**

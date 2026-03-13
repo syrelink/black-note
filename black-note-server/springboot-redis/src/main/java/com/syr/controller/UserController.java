@@ -5,7 +5,6 @@ import com.syr.dto.LoginDTO;
 import com.syr.dto.RegisterDTO;
 import com.syr.dto.UserUpdateDTO;
 import com.syr.service.UserService;
-import com.syr.utils.UserHolder;
 import com.syr.vo.LoginVO;
 import com.syr.vo.UserVO;
 import lombok.RequiredArgsConstructor;

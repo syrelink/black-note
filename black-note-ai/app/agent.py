@@ -6,7 +6,6 @@
 """
 
 import os
-from typing import List
 from dotenv import load_dotenv
 
 from langchain.agents import create_agent
@@ -15,9 +14,7 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import create_engine, text
-
-# 导入你的 RAG tool 工厂（假设在 rag.py 中定义）
-from rag import make_rag_tool   # ← 调整路径，如果 rag.py 在同一目录就 ok
+from app.rag import make_rag_tool
 
 load_dotenv()
 
@@ -115,7 +112,7 @@ def build_agent(vectorstore, user_id: str, thread_id: str = None):
 
     # 使用 create_agent（LangChain 当前推荐方式）
     agent = create_agent(
-        llm=llm,
+        model=llm,
         tools=tools,
         system_prompt=system_prompt,
         checkpointer=_checkpointer,
