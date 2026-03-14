@@ -26,7 +26,6 @@ export default function Navbar({ activeTab, onTabChange, onPublish, onLogin }) {
                       </span>
                   }
                 </div>
-                {/* 手机上隐藏昵称，只显示头像 */}
                 <span className={styles.nickname}>{userInfo?.nickname || userInfo?.username}</span>
               </div>
               <button className={styles.btnSecondary} onClick={logout}>退出</button>
@@ -38,12 +37,18 @@ export default function Navbar({ activeTab, onTabChange, onPublish, onLogin }) {
         </div>
       </nav>
 
-      {/* 桌面端：顶部 Tab（手机上隐藏） */}
+      {/* 桌面端：顶部 Tab */}
       <div className={styles.desktopTabs}>
         <button
           className={`${styles.tab} ${activeTab === 'discover' ? styles.active : ''}`}
           onClick={() => onTabChange('discover')}
         >发现</button>
+        <button
+          className={`${styles.tab} ${activeTab === 'rover' ? styles.active : ''}`}
+          onClick={() => onTabChange('rover')}
+        >
+          ✨ Rover
+        </button>
         <button
           className={`${styles.tab} ${activeTab === 'follow' ? styles.active : ''}`}
           onClick={() => onTabChange('follow')}
@@ -58,6 +63,14 @@ export default function Navbar({ activeTab, onTabChange, onPublish, onLogin }) {
         >
           <span className={styles.bottomIcon}>🔍</span>
           <span className={styles.bottomLabel}>发现</span>
+        </button>
+
+        <button
+          className={`${styles.bottomTab} ${activeTab === 'rover' ? styles.bottomActive : ''}`}
+          onClick={() => onTabChange('rover')}
+        >
+          <span className={styles.bottomIcon}>✨</span>
+          <span className={styles.bottomLabel}>Rover</span>
         </button>
 
         <button className={styles.bottomPublish} onClick={onPublish}>

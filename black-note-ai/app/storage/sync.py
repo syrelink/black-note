@@ -1,9 +1,9 @@
 """
-增量同步模块（app/store/sync.py）
+增量同步模块（app/storage/sync.py）
 新笔记发布/编辑/删除时，同步更新 ChromaDB。
 
 核心流程：
-- 新增/更新笔记：Load → 清理 + 分块 → Embed → Store（支持 hybrid）
+- 新增/更新笔记：Load → 清理 + 分块 → Embed → storage（支持 hybrid）
 - 删除笔记：按 note_id 删除所有相关 chunk
 
 注意：已统一使用 preprocess_and_chunk 进行清理 + 分块，与全量建库保持一致
@@ -17,8 +17,8 @@ import pymysql
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from app.store.embeddings import BGEEmbeddings
-from app.store.text_cleaner import preprocess_and_chunk
+from app.storage.embeddings import BGEEmbeddings
+from app.storage.text_cleaner import preprocess_and_chunk
 
 
 # 配置（与全量建库保持一致）

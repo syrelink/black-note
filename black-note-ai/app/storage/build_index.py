@@ -9,19 +9,14 @@ Step 4. Store  - 存入 ChromaDB（支持 hybrid）
 """
 
 import os
-import chromadb
 import pymysql
-from typing import List
 from langchain_chroma import Chroma
-from chromadb.utils.embedding_functions import ChromaBm25EmbeddingFunction
-from langchain_core.documents import Document
-from app.store.embeddings import BGEEmbeddings
+from app.storage.embeddings import BGEEmbeddings
 
 # ←←← 统一调用清理 + 分块模块
-from app.store.text_cleaner import preprocess_and_chunk
+from app.storage.text_cleaner import preprocess_and_chunk
 
-
-# ── Step 1: Load ──────────────────────────────────────────────────────────────
+# ── Step 1: Load 加载数据──────────────────────────────────────────────────────────────
 def load_notes_from_mysql():
     """Step 1: Load - 从 MySQL 读取全部未删除笔记（含作者信息）。"""
     conn = pymysql.connect(
@@ -50,7 +45,7 @@ def load_notes_from_mysql():
         conn.close()
 
 
-# ── Step 1 → Step 2 准备：转成 Document 对象 ──────────────────────────────────
+# ── Step 2+3: 转换成文档对象(内容+元数据) + 分块 ──────────────────────────────────
 def notes_to_documents(notes):
     """
     Step 2: Split - 调用独立清理 + 分块模块
@@ -75,48 +70,31 @@ def notes_to_documents(notes):
     return docs
 
 
-# ── Step 3 + Step 4: Embed + Store ───────────────────────────────────────────
+# ── Step 4+5: chunks向量化 + 存储到向量数据库 ───────────────────────────────────────────
 def store_to_chroma(chunks, embeddings):
     """
-    Step 3: Embed + Step 4: Store
-    生成 dense 向量 + BM25 sparse 向量，一次性存入 Chroma（支持 hybrid）
+    使用 Chroma.from_documents 一行完成：
+    - 向量化（dense）
+    - 创建 collection
+    - 持久化存储
     """
     chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
     collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")
 
-    client = chromadb.PersistentClient(path=chroma_dir)
-
-    # 清空旧 collection
-    existing = [c.name for c in client.list_collections()]
-    if collection_name in existing:
-        client.delete_collection(collection_name)
-
-    bm25_ef = ChromaBm25EmbeddingFunction(k=1.2, b=0.75, avg_doc_length=256.0)
-
-    collection = client.create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"}
+    # 官方最佳实践：一行完成初始化 + 添加文档
+    vectorstore = Chroma.from_documents(
+        documents=chunks,                    # 你的 cleaned chunks
+        embedding=embeddings,                # BGEEmbeddings
+        persist_directory=chroma_dir,        # 本地持久化
+        collection_name=collection_name,     # 指定 collection 名
     )
 
-    ids = [str(i) for i in range(len(chunks))]
-    texts = [doc.page_content for doc in chunks]
-    metadatas = [doc.metadata for doc in chunks]
-
-    dense_embeddings = embeddings.embed_documents(texts)
-
-    collection.add(
-        ids=ids,
-        documents=texts,
-        embeddings=dense_embeddings,
-        metadatas=metadatas
-    )
-
-    print(f"✅ Chroma hybrid-ready collection 建库完成：{len(chunks)} 个 chunk")
+    print(f"✅ Chroma 索引库建库完成：{len(chunks)} 个 chunk")
 
 
 if __name__ == "__main__":
     notes = load_notes_from_mysql()
-    print(f"📄 Step 1: Load 完成 → 读取笔记：{len(notes)} 条")
+    print(f"✅ Step 1: Load 完成 → 读取笔记：{len(notes)} 条")
 
     docs = notes_to_documents(notes)
     print(f"✅ Step 2: Split + 清理完成 → 有效 chunk：{len(docs)} 个")

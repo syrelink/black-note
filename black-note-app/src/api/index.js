@@ -1,9 +1,9 @@
 import axios from 'axios'
 
-// 创建axios实例，所有请求走 /api 前缀，vite proxy转发到后端
+// 创建axios实例，所有请求走 /api 前缀，由 Vite proxy 转发到后端
 const http = axios.create({
   baseURL: '/api',
-  timeout: 10000,
+  timeout: 10000,       
 })
 
 // 请求拦截器：自动带上token
@@ -13,6 +13,7 @@ http.interceptors.request.use(config => {
   return config
 })
 
+// 响应拦截器
 http.interceptors.response.use(
   (res) => {
     const data = res.data
@@ -27,6 +28,10 @@ http.interceptors.response.use(
     }
     return data
   },
+  (error) => {
+    console.error('请求错误:', error)
+    return Promise.reject(error)
+  }
 )
 
 // ── 用户接口 ──
@@ -40,14 +45,30 @@ export const userApi = {
 // ── 笔记接口 ──
 export const noteApi = {
   publish:      (data)   => http.post('/note/publish', data),
-  getById:    (id) => http.get(`/note/${id}`),
+  getById:      (id)     => http.get(`/note/${id}`),
   updateNote:   (id, data) => http.put(`/note/update/${id}`, data), 
-  deleteNote: (id) => http.get(`/note/delete/${id}`),
+  deleteNote:   (id)     => http.delete(`/note/delete/${id}`),
   listByUser:   (userId) => http.get(`/note/list/${userId}`),
   like:         (noteId) => http.post(`/note/like/${noteId}`),
   getLikeCount: (noteId) => http.get(`/note/like/count/${noteId}`),
   isLiked:      (noteId) => http.get(`/note/like/status/${noteId}`), 
-  noteList: (page = 1, size = 20) => http.get(`/note/list?page=${page}&size=${size}`),
+  noteList:     (page = 1, size = 20) => http.get(`/note/list?page=${page}&size=${size}`),
+}
+
+// ── AI 助手接口 ──
+export const chatApi = {
+  // 流式输出必须用原生 fetch，axios 不支持 ReadableStream
+  chat: (data) => {
+    const token = localStorage.getItem('token')
+    return fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token,
+      },
+      body: JSON.stringify(data),
+    })
+  }
 }
 
 // ── 关注接口 ──
@@ -55,7 +76,7 @@ export const followApi = {
   follow:       (userId) => http.post(`/follow/${userId}`),
   isFollow:     (userId) => http.get(`/follow/isFollow/${userId}`),
   commonFollow: (userId) => http.get(`/follow/common/${userId}`),
-  followList: (userId) => http.get(`/follow/list/${userId}`),
+  followList:   (userId) => http.get(`/follow/list/${userId}`),
 }
 
 // ── Feed接口 ──

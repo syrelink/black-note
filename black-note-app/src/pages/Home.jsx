@@ -9,7 +9,7 @@ import Masonry from '../components/Masonry'
 import NoteDetail from '../components/NoteDetail'
 import PublishModal from '../components/PublishModal'
 import LoginModal from '../components/LoginModal'
-import AiChat from '../components/AiChat'
+import RoverPage from '../pages/ChatPage'
 import styles from './Home.module.css'
 
 export default function Home() {
@@ -35,7 +35,6 @@ export default function Home() {
   const touchStartY     = useRef(0)
   const PULL_THRESHOLD  = 70
 
-  // ── 加载数据 ──
   const loadNotes = useCallback(async (reset) => {
     if (loadingRef.current) return
     if (!reset && !hasMoreRef.current) return
@@ -60,9 +59,7 @@ export default function Home() {
       setLikeMap(prev => {
         const next = { ...prev }
         list.forEach(n => {
-          if (!next[n.id]) {
-            next[n.id] = { liked: !!n.isLiked, count: n.likeCount || 0 }
-          }
+          if (!next[n.id]) next[n.id] = { liked: !!n.isLiked, count: n.likeCount || 0 }
         })
         return next
       })
@@ -78,22 +75,18 @@ export default function Home() {
     }
   }, [tab, isLogin])
 
-  // ── 点赞 ──
   const handleLike = async (noteId) => {
     if (!isLogin) return
     await noteApi.like(noteId)
     setLikeMap(prev => {
-      const cur      = prev[noteId] || { liked: false, count: 0 }
+      const cur = prev[noteId] || { liked: false, count: 0 }
       const newLiked = !cur.liked
-      return {
-        ...prev,
-        [noteId]: { liked: newLiked, count: newLiked ? cur.count + 1 : cur.count - 1 }
-      }
+      return { ...prev, [noteId]: { liked: newLiked, count: newLiked ? cur.count + 1 : cur.count - 1 } }
     })
   }
 
-  // tab / 登录状态变化时重置
   useEffect(() => {
+    if (tab === 'rover') return
     discoverPageRef.current = 1
     hasMoreRef.current = true
     loadNotes(true)
@@ -102,23 +95,22 @@ export default function Home() {
 
   useEffect(() => {
     if (location.state?.refresh) {
-        discoverPageRef.current = 1
-        hasMoreRef.current = true
-        loadNotes(true)
+      discoverPageRef.current = 1
+      hasMoreRef.current = true
+      loadNotes(true)
     }
   }, [location.state?.refresh])
 
-  // 无限滚动
   useEffect(() => {
     const handleScroll = () => {
+      if (tab === 'rover') return
       const distFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight
       if (distFromBottom < 200) loadNotes(false)
     }
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
-  }, [loadNotes])
+  }, [loadNotes, tab])
 
-  // 下拉刷新
   useEffect(() => {
     const handleTouchStart = (e) => {
       touchStartY.current = window.scrollY === 0 ? e.touches[0].clientY : 0
@@ -151,6 +143,7 @@ export default function Home() {
 
   const handleTabChange = (t) => {
     if (t === 'follow' && !isLogin) { setShowLogin(true); return }
+    if (t === 'rover'  && !isLogin) { setShowLogin(true); return }
     setTab(t)
   }
 
@@ -164,6 +157,28 @@ export default function Home() {
     transition: pullDist === 0 ? 'all .3s ease' : 'none',
   }
 
+  // ── Rover 全屏，完全脱离普通布局 ──
+  if (tab === 'rover') {
+    return (
+      <>
+        <Navbar
+          activeTab={tab}
+          onTabChange={handleTabChange}
+          onPublish={() => isLogin ? setShowPublish(true) : setShowLogin(true)}
+          onLogin={() => setShowLogin(true)}
+        />
+        <RoverPage userId={myId} />
+        {showPublish && (
+          <PublishModal
+            onClose={() => setShowPublish(false)}
+            onSuccess={() => { discoverPageRef.current = 1; hasMoreRef.current = true; loadNotes(true) }}
+          />
+        )}
+        {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      </>
+    )
+  }
+
   return (
     <>
       <Navbar
@@ -175,14 +190,9 @@ export default function Home() {
 
       <SearchBar
         onSearch={setKeyword}
-        onTagChange={() => {
-          discoverPageRef.current = 1
-          hasMoreRef.current = true
-          loadNotes(true)
-        }}
+        onTagChange={() => { discoverPageRef.current = 1; hasMoreRef.current = true; loadNotes(true) }}
       />
 
-      {/* 下拉刷新指示器 */}
       <div className={styles.pullIndicator} style={pullIndicatorStyle}>
         {refreshing
           ? <div className={styles.refreshSpinner} />
@@ -190,12 +200,9 @@ export default function Home() {
         }
       </div>
 
-      {/* 主体两栏布局 */}
       <div className={styles.layout}>
-
         <main className={styles.main}>
 
-          {/* 关注 Tab */}
           {tab === 'follow' && !loading && (
             followUsers.length === 0 ? (
               <div className={styles.empty}>
@@ -205,34 +212,22 @@ export default function Home() {
             ) : (
               <div className={styles.followList}>
                 {followUsers.map(user => (
-                  <div
-                    key={user.id}
-                    className={styles.followItem}
-                    onClick={() => navigate(`/user/${user.id}`)}
-                  >
+                  <div key={user.id} className={styles.followItem} onClick={() => navigate(`/user/${user.id}`)}>
                     <div className={styles.followAvatar}>
                       {user.avatar
                         ? <img src={user.avatar} alt={user.nickname} />
                         : <span>{(user.nickname || user.username)?.charAt(0)}</span>
                       }
                     </div>
-                    <span className={styles.followName}>
-                      {user.nickname || user.username}
-                    </span>
+                    <span className={styles.followName}>{user.nickname || user.username}</span>
                   </div>
                 ))}
               </div>
             )
           )}
 
-          {/* 发现 Tab：瀑布流 */}
           {tab === 'discover' && displayNotes.length > 0 && (
-            <Masonry
-              notes={displayNotes}
-              onCardClick={setActiveNote}
-              onLike={handleLike}
-              likeMap={likeMap}
-            />
+            <Masonry notes={displayNotes} onCardClick={setActiveNote} onLike={handleLike} likeMap={likeMap} />
           )}
 
           {tab === 'discover' && !loading && displayNotes.length === 0 && (
@@ -252,14 +247,7 @@ export default function Home() {
           {tab === 'discover' && !hasMore && !loading && notes.length > 0 && (
             <div className={styles.noMore}>— 已经到底了 —</div>
           )}
-
         </main>
-
-        {/* 右侧 AI 助手 */}
-        <aside className={styles.sidebar}>
-          <AiChat userId={myId} />
-        </aside>
-
       </div>
 
       {activeNote && (
@@ -268,27 +256,18 @@ export default function Home() {
           onClose={() => setActiveNote(null)}
           onLike={handleLike}
           likeMap={likeMap}
-          onDeleted={() => {
-            setNotes(prev => prev.filter(n => n.id !== activeNote.id))
-            setActiveNote(null)
-          }}
+          onDeleted={() => { setNotes(prev => prev.filter(n => n.id !== activeNote.id)); setActiveNote(null) }}
         />
       )}
 
       {showPublish && (
         <PublishModal
           onClose={() => setShowPublish(false)}
-          onSuccess={() => {
-            discoverPageRef.current = 1
-            hasMoreRef.current = true
-            loadNotes(true)
-          }}
+          onSuccess={() => { discoverPageRef.current = 1; hasMoreRef.current = true; loadNotes(true) }}
         />
       )}
 
-      {showLogin && (
-        <LoginModal onClose={() => setShowLogin(false)} />
-      )}
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
     </>
   )
 }

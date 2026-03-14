@@ -19,12 +19,12 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 # 核心模块
-from .agent import build_agent
-from .auth import get_request_user_id
-from .schemas import AgentRequest, ChatRequest
+from app.core.agent import build_agent
+from app.auth import get_request_user_id
+from app.core.schemas import AgentRequest, ChatRequest
 
 # 同步模块（HTTP 回调使用）
-from app.sync import *
+from app.storage.sync import *
 
 load_dotenv()
 
