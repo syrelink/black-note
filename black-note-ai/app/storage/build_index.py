@@ -93,6 +93,19 @@ def store_to_chroma(chunks, embeddings):
 
 
 if __name__ == "__main__":
+    # ── 建库前先清空旧数据（保证幂等性）────────────────────
+    import chromadb
+    chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
+    collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")
+    
+    try:
+        client = chromadb.PersistentClient(path=chroma_dir)
+        client.delete_collection(collection_name)
+        print(f"🗑️  旧索引已清空：{collection_name}")
+    except Exception:
+        print("📭 未找到旧索引，直接建库")
+
+    # ── 正式建库 ──────────────────────────────────────────
     notes = load_notes_from_mysql()
     print(f"✅ Step 1: Load 完成 → 读取笔记：{len(notes)} 条")
 

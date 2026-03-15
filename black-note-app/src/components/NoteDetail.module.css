@@ -9,33 +9,54 @@
 .modal {
   background: var(--card);
   width: 880px; max-width: 96vw;
-  max-height: 90vh;
-  display: flex; overflow: hidden;
+  height: 88vh;
+  display: flex;
+  overflow: hidden;
   border: 1px solid var(--border);
   animation: modalIn .25s ease;
+  position: relative;
+  resize: both;
+  min-width: 400px;
+  min-height: 300px;
 }
 
-/* ── 左侧图片轮播区 ── */
+/* ── 左侧图片区 ── */
 .left {
-  width: 50%; flex-shrink: 0;
+  flex-shrink: 0;
   background: #111;
   position: relative;
   overflow: hidden;
-  min-height: 400px;
-  display: flex; align-items: center; justify-content: center;
+  min-width: 25%;
+  max-width: 75%;
+  display: flex;
+  flex-direction: column;
 }
 
-.imgTrack { position: absolute; inset: 0; }
+.imgScroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  scroll-snap-type: y mandatory;
+}
+.imgScroll::-webkit-scrollbar { display: none; }
+
+.imgSlide {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  scroll-snap-align: start;
+  flex-shrink: 0;
+}
 
 .slideImg {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  transition: transform .35s cubic-bezier(.4,0,.2,1);
-  will-change: transform;
 }
-
-.noImg { font-size: 3rem; color: #444; }
 
 .arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
@@ -64,7 +85,7 @@
   border: none; padding: 0; cursor: pointer;
   transition: background .2s, transform .2s;
 }
-.dot:hover  { background: rgba(255,255,255,.7); }
+.dot:hover { background: rgba(255,255,255,.7); }
 .dotActive  { background: white; transform: scale(1.3); }
 
 .counter {
@@ -76,16 +97,97 @@
   z-index: 10;
 }
 
-/* ── 右侧内容区 ── */
+/* ── 拖拽分隔线 ── */
+.divider {
+  width: 6px;
+  flex-shrink: 0;
+  background: transparent;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: background .15s;
+}
+.divider:hover { background: rgba(0,0,0,.06); }
+.divider:hover .dividerHandle { opacity: 1; }
+
+.dividerHandle {
+  width: 3px;
+  height: 40px;
+  border-radius: 3px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity .2s;
+}
+
+/* ── 右侧内容区：flex 列，顶部底部固定，中间滚动 ── */
 .right {
-  flex: 1; padding: 2rem 1.8rem;
-  overflow-y: auto;
-  display: flex; flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   position: relative;
 }
 
-.rightFull {
+.rightFull { width: 100%; }
+
+/* ── 顶部固定：作者信息，外层不参与点击交互 ── */
+.author {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: 0.5rem 1.8rem;
+  border-bottom: 1px solid var(--border);
   width: 100%;
+  box-sizing: border-box;
+  background: var(--card);
+  /* 无 cursor、无 hover、无 transition，避免外层空白区误触发虚化 */
+}
+
+/* ── 头像：点击跳转，hover 只在自身生效 ── */
+.avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.avatar:hover { opacity: .7; }
+.avatar img  { width: 100%; height: 100%; object-fit: cover; }
+.avatar span { font-size: .85rem; font-weight: 600; color: var(--muted); }
+
+/* ── 昵称+时间区域：点击跳转，hover 只在自身生效 ── */
+.authorInfo {
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.authorInfo:hover { opacity: .7; }
+
+.authorName { font-size: .88rem; font-weight: 600; }
+.time       { font-size: .72rem; color: var(--muted); margin-top: .15rem; }
+
+/* ── 中间滚动区：标题 + 正文 ── */
+.scrollBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.2rem 1.8rem 1rem;
+  min-height: 0;
+}
+
+/* ── 底部固定：操作栏 ── */
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.8rem;
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 
 .authorActions { display: flex; gap: .5rem; }
@@ -119,27 +221,6 @@
 }
 .closeBtn:hover { color: var(--ink); }
 
-.author {
-  display: flex; align-items: center; gap: .7rem;
-  margin-bottom: 1.2rem;
-  cursor: pointer; width: fit-content;
-  padding: .3rem .4rem .3rem 0;
-  transition: opacity .2s;
-}
-.author:hover { opacity: .7; }
-
-.avatar {
-  width: 38px; height: 38px; border-radius: 50%;
-  background: var(--border); flex-shrink: 0;
-  overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-}
-.avatar img  { width: 100%; height: 100%; object-fit: cover; }
-.avatar span { font-size: .85rem; font-weight: 600; color: var(--muted); }
-
-.authorName { font-size: .88rem; font-weight: 600; }
-.time       { font-size: .72rem; color: var(--muted); margin-top: .15rem; }
-
 .title {
   font-size: 1.12rem; font-weight: 700;
   line-height: 1.55; margin-bottom: .9rem;
@@ -147,9 +228,15 @@
 
 .content {
   font-size: .86rem; line-height: 1.9;
-  color: #3a3530; flex: 1;
-  font-family: 'Lora', 'Noto Serif SC', 'SimSun', Georgia, serif; /* 加这行 */
+  color: #3a3530;
+  font-family: 'Lora', 'Noto Serif SC', 'SimSun', Georgia, serif;
+  container-type: inline-size;
 }
+
+@container (max-width: 300px) {
+  .content { font-size: .78rem; }
+}
+
 .content h1 { font-size: 1.3rem; margin: .6rem 0 .3rem; }
 .content h2 { font-size: 1.1rem; margin: .6rem 0 .3rem; }
 .content h3 { font-size: .95rem; margin: .5rem 0 .3rem; }
@@ -161,17 +248,13 @@
   padding: .1rem .35rem;
   font-family: 'DM Mono', monospace;
   font-size: .78rem;
+  word-break: break-all;
 }
+.content pre { overflow-x: auto; }
 .content ul { padding-left: 1.2rem; }
 .content li { margin: .2rem 0; }
 .content a  { color: var(--accent); text-decoration: underline; }
-
-.actions {
-  display: flex; align-items: center;
-  justify-content: space-between;
-  margin-top: 1.5rem; padding-top: 1rem;
-  border-top: 1px solid var(--border);
-}
+.content img { max-width: 100%; height: auto; }
 
 .likeBtn {
   background: none; border: none;
@@ -189,35 +272,38 @@
     align-items: flex-end;
   }
 
-  /* 全屏从底部滑入 */
   .modal {
     width: 100%;
     max-width: 100%;
-    max-height: 95vh;
+    height: 95vh;
     flex-direction: column;
     border: none;
     border-radius: 16px 16px 0 0;
     animation: slideUp .3s ease;
   }
 
-  /* 图片区在手机上高度固定，内容在下方滚动 */
   .left {
-    width: 100%;
-    min-height: 0;
-    height: 280px;
+    width: 100% !important;
+    height: 260px;
     flex-shrink: 0;
+    min-width: unset;
+    max-width: unset;
   }
+
+  .divider { display: none; }
 
   .right {
-    padding: 1.2rem 1rem 1.5rem;
+    padding: 0;
     flex: 1;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
+  .author  { padding: 0.5rem 1rem; }
+  .scrollBody { padding: 1rem 1rem .8rem; }
+  .actions { padding: 0.6rem 1rem; }
+
   .rightFull { max-width: 100%; }
-
   .closeBtn { width: 36px; height: 36px; font-size: 1rem; }
-
   .title { font-size: 1rem; }
   .content { font-size: .84rem; }
   .likeBtn { font-size: .88rem; }

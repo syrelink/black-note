@@ -1,7 +1,12 @@
 """
-app/rag.py
-专门负责 RAG 检索逻辑（build_retriever + rerank_docs）
-不包含任何 @tool 定义
+app/core/rag.py
+负责 RAG 检索逻辑。
+
+改动说明：
+  - make_rag_retriever：返回检索器本身（不再返回 @tool 函数）
+    用户过滤改到 tools.py 里统一处理
+  - rerank_docs：不变
+  - 移除原来的 make_rag_tool，该职责已移入 tools.py 的 search_notes 工具
 """
 
 import os
@@ -13,55 +18,63 @@ from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 from flashrank import Ranker, RerankRequest
+import jieba
 
 load_dotenv()
 
 
-def build_retriever(vectorstore: Chroma, user_id: str):
+_retriever_cache: dict = {} 
+
+# app/core/rag.py
+
+_retriever_cache: dict = {}   # key = collection_name，value = retriever
+
+def make_rag_retriever(vectorstore: Chroma):
     """
-    构建混合检索器（Hybrid Retriever）
-    
-    核心思想：同时使用两种互补的检索方式，再通过 RRF 算法融合结果。
-    - Dense（向量检索）：擅长语义相似匹配
-    - BM25（关键词检索）：擅长精确匹配标题、专有名词、代码等
+    构建混合检索器，结果缓存在模块变量里。
+    同一个 vectorstore 只建一次，后续直接复用。
     """
-    
-    # ==================== 第一部分：Dense 向量检索器 ====================
-    # 使用 Chroma 内置的向量索引进行语义搜索
-    # filter 确保只能检索当前用户的笔记（多用户隔离）
+    cache_key = vectorstore._collection.name
+
+    if cache_key in _retriever_cache:
+        return _retriever_cache[cache_key]   # 直接返回缓存
+
+    # ── 第一次调用才真正构建 ──────────────────────────────
     vector_retriever = vectorstore.as_retriever(
-        search_type="similarity",           # 使用余弦相似度
-        search_kwargs={
-            "k": 12,                        # 先多召回一些，给后面的重排序留空间
-            "filter": {"user_id": user_id}  # 关键：用户隔离
-        }
+        search_type="similarity",
+        search_kwargs={"k": 20},
     )
 
-    # ==================== 第二部分：BM25 关键词检索器 ====================
-    # 从 Chroma 中取出当前用户的所有 chunk，实时构建 BM25 索引
-    # 这是为了让 BM25 也能只检索当前用户的数据
-    result = vectorstore.get(where={"user_id": user_id})
-    raw_docs = result.get("documents", [])
-    metadatas = result.get("metadatas", [])
+    result = vectorstore.get()
     documents = [
-        Document(page_content=text, metadata=meta)
-        for text, meta in zip(raw_docs, metadatas)
+        Document(page_content=text or "", metadata=meta or {})
+        for text, meta in zip(
+            result.get("documents", []),
+            result.get("metadatas", []),
+        )
     ]
-    bm25_retriever = BM25Retriever.from_documents(documents, k=12)
 
-    # ==================== 第三部分：Ensemble 融合 ====================
-    # 使用 EnsembleRetriever 把两种检索结果融合
-    # weights=[0.48, 0.52] 表示 BM25 权重稍高（笔记场景中精确匹配更重要）
-    # c=60 是 RRF 算法的平滑参数
-    return EnsembleRetriever(
-        retrievers=[bm25_retriever, vector_retriever],
-        weights=[0.48, 0.52],      # 可根据实际效果微调
-        c=60                       # RRF 参数，通常 60 效果较好
+    def chinese_preprocess(text: str):
+        return list(jieba.cut(text))
+
+    bm25_retriever = BM25Retriever.from_documents(
+        documents,
+        k=20,
+        preprocess_func=chinese_preprocess,
     )
 
+    retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.48, 0.52],
+        c=60,
+    )
+
+    _retriever_cache[cache_key] = retriever   # 存入缓存
+    print(f"✅ BM25 检索器已构建并缓存（{len(documents)} 个文档）")
+    return retriever
 
 def rerank_docs(query: str, docs: List[Document], top_n: int = 6) -> List[Document]:
-    """FlashRank 重排序（防御性实现）"""
+    """FlashRank 重排序（防御性实现，不变）"""
     if not docs:
         return []
 
@@ -76,45 +89,12 @@ def rerank_docs(query: str, docs: List[Document], top_n: int = 6) -> List[Docume
         results = ranker.rerank(RerankRequest(query=query.strip(), passages=passages))
 
         sorted_indices = sorted(
-            range(len(results)), 
-            key=lambda i: float(results[i].get("score", 0)), 
-            reverse=True
+            range(len(results)),
+            key=lambda i: float(results[i].get("score", 0)),
+            reverse=True,
         )
         return [valid_docs[i] for i in sorted_indices[:top_n] if i < len(valid_docs)]
+
     except Exception:
         return valid_docs[:top_n]
 
-
-def make_rag_tool(vectorstore: Chroma, user_id: str):
-    """
-    返回 RAG Tool 函数（供 tools.py 调用）
-    """
-    retriever = build_retriever(vectorstore, user_id)
-
-    def search_notes_rag(query: str) -> str:
-        """高级语义搜索（混合检索 + 重排序）"""
-        raw_docs = retriever.invoke(query)
-        if not raw_docs:
-            return "您的笔记中暂无相关内容。"
-
-        reranked = rerank_docs(query, raw_docs, top_n=7)
-
-        # 去重 + 格式化
-        seen = set()
-        unique_docs = []
-        for doc in reranked:
-            note_id = doc.metadata.get("note_id")
-            if note_id and note_id not in seen:
-                seen.add(note_id)
-                unique_docs.append(doc)
-
-        if not unique_docs:
-            return "您的笔记中暂无相关内容。"
-
-        parts = []
-        for i, doc in enumerate(unique_docs, 1):
-            content = doc.page_content[:480] + "..." if len(doc.page_content) > 480 else doc.page_content
-            parts.append(f"【笔记 {i}】标题：{doc.metadata.get('title', '无标题')}\n内容：{content}")
-        return "\n\n".join(parts)
-
-    return search_notes_rag

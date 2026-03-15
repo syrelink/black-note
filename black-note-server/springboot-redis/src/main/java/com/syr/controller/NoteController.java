@@ -32,7 +32,7 @@ public class NoteController {
         noteService.updateNote(id, dto);
         return Result.success();
     }
-    @GetMapping("/delete/{id}")
+    @DeleteMapping("/delete/{id}")
     public Result<Void> deleteNote(@PathVariable Long id) {
         noteService.deleteNote(id);
         return Result.success();
