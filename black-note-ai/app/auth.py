@@ -49,4 +49,6 @@ async def get_request_user_id(
     if not user_id:
         raise HTTPException(status_code=401, detail="token无效或已过期，请重新登录")
 
+    await get_redis().expire(redis_key, 60 * 60)
+
     return str(user_id)

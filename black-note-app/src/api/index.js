@@ -56,19 +56,26 @@ export const noteApi = {
 }
 
 // ── AI 助手接口 ──
+// api.js
 export const chatApi = {
-  // 流式输出必须用原生 fetch，axios 不支持 ReadableStream
-  chat: (data) => {
-    const token = localStorage.getItem('token')
-    return fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token,
-      },
-      body: JSON.stringify(data),
-    })
-  }
+  chat: (data, signal) => {   // ← 加 signal 参数
+      const token = localStorage.getItem('token')
+      return fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Authorization': token,
+          },
+          body: JSON.stringify(data),
+          signal,   // ← 传给 fetch，abort 时自动断开连接
+      })
+  },
+}
+// ── 会话接口（单独导出）──
+export const sessionApi = {
+  list:   ()                 => http.get('/chat/sessions'),
+  upsert: (sessionId, title) => http.post(`/chat/sessions/${sessionId}`, { title }),
+  delete: (sessionId)        => http.delete(`/chat/sessions/${sessionId}`),
 }
 
 // ── 关注接口 ──

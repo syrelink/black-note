@@ -24,12 +24,28 @@ export function AuthProvider({ children }) {
     localStorage.setItem('userInfo', JSON.stringify(info))
   }
 
-  const logout = () => {
-    setToken('')
-    setUserInfo(null)
-    localStorage.removeItem('token')
-    localStorage.removeItem('userInfo')
+// useAuth.jsx
+const logout = () => {
+  // 清除当前用户的所有会话数据
+  const uid = userInfo?.id
+  if (uid) {
+      // 取出所有 session，逐个删除消息
+      try {
+          const sessions = JSON.parse(
+              localStorage.getItem(`rover_sessions_${uid}`) || '[]'
+          )
+          sessions.forEach(s => {
+              localStorage.removeItem(`rover_msgs_${uid}_${s.id}`)
+          })
+          localStorage.removeItem(`rover_sessions_${uid}`)
+      } catch {}
   }
+
+  setToken('')
+  setUserInfo(null)
+  localStorage.removeItem('token')
+  localStorage.removeItem('userInfo')
+}
 
   return (
     <AuthContext.Provider value={{  

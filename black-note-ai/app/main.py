@@ -55,7 +55,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ── 内部同步接口 ──────────────────────────────────────────────
 @app.post("/internal/sync-note")
 async def internal_sync_note(payload: dict, background_tasks: BackgroundTasks):
@@ -116,18 +115,16 @@ async def chat(
                 # ── updates 模式：节点状态变化，用于调试面板 ──────────
                 if chunk["type"] == "updates":
                     for node_name, update in chunk["data"].items():
-
                         if node_name == "llm_call":
-                            # update = {"messages": [...], "llm_calls": N}
                             calls = update.get("llm_calls", "?")
                             yield f"data: [DEBUG:llm_call:{calls}]\n\n"
 
-                        elif node_name == "tool_node":
-                            # update = {"messages": [ToolMessage(name="search_notes", ...)]}
-                            for m in update.get("messages", []):
-                                tool_name = getattr(m, "name", "unknown")
-                                yield f"data: [DEBUG:tool:{tool_name}]\n\n"
-
+                            # ← 同时从这里取工具名，比从 ToolMessage 取更可靠
+                            msgs = update.get("messages", [])
+                            for m in msgs:
+                                for tc in getattr(m, "tool_calls", []):
+                                    tool_name = tc.get("name", "tool")
+                                    yield f"data: [DEBUG:tool:{tool_name}]\n\n"
                 # ── messages 模式：LLM token，用于流式显示 ────────────
                 elif chunk["type"] == "messages":
                     # 文档写法：从 chunk["data"] 解包 (msg, metadata)

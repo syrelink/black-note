@@ -19,7 +19,6 @@ def _get_model():
         print("✅ bge-m3 加载成功")
     return _model
 
-
 # ==================== 对外使用的 LangChain 接口类 ====================
 class BGEEmbeddings(Embeddings):
 

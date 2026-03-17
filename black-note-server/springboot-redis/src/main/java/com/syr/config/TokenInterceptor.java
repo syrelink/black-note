@@ -27,11 +27,10 @@ public class TokenInterceptor implements HandlerInterceptor {
 
         String key = "login:token:" + token;
         String userId = redisTemplate.opsForValue().get(key);
-        log.info("Redis查询key: {}, 结果userId: {}", key, userId); // 加这行
 
         if (userId == null) return true;
 
-        redisTemplate.expire(key, 30, TimeUnit.MINUTES);
+        redisTemplate.expire(key, 60, TimeUnit.MINUTES);
         UserHolder.setUserId(Long.parseLong(userId));
         return true;
     }
