@@ -1,12 +1,12 @@
 """
 app/core/graph.py
 
-严格按照官方文档 Quickstart（Graph API）写法实现。
+严格按照官方文档 Quickstart(Graph API)写法实现。
 
-文档关键写法（和旧版不同的地方）：
+文档关键写法（和旧版不同的地方）
 
-1. 工具节点手写，不用 ToolNode：
-   文档里 tool_node 自己遍历 tool_calls，用 tools_by_name 字典查找执行，
+1. 工具节点手写，不用 ToolNode:
+   文档里 tool_node 自己遍历 tool_calls,用 tools_by_name 字典查找执行，
    返回 ToolMessage 列表。
 
 2. 条件边第三个参数传列表，不传字典：
@@ -18,9 +18,9 @@ app/core/graph.py
    - 工具节点叫 "tool_node"（文档里叫这个）
 
 4. llm_calls 计数跟文档示例一致：
-   每次调用 LLM 时 +1，记录在 State 里。
+   每次调用 LLM 时 +1,记录在 State 里。
 
-5. Streaming 用 version="v2"：
+5. Streaming 用 version="v2":
    文档明确说 "All examples on this page use version='v2'"
    chunk 格式变成 {"type": ..., "data": ...}
 """
