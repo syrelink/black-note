@@ -32,6 +32,7 @@ from app.auth import get_request_user_id
 from app.core.schemas import ChatRequest
 from app.storage.sync import get_vectorstore, sync_single_note, delete_note_from_vectorstore
 from fastapi import BackgroundTasks
+from app.core.schemas import AgentContext
 
 load_dotenv()
 
@@ -89,7 +90,6 @@ async def chat(
             "user_id":   user_id,
         }
     }
-
     def generate():
         """
         按文档 Streaming v2 写法，同时开 messages + updates 两个模式。

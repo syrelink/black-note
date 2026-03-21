@@ -1,24 +1,16 @@
 """
-【RAG 标准流程】入库流程：
-Step 1. Load   - 从 MySQL 读取原始笔记数据
-Step 2. Split  - MarkdownHeader + Recursive 两阶段分块 + 清理
-Step 3. Embed  - 用 BGEEmbeddings 生成向量
-Step 4. Store  - 存入 ChromaDB（支持 hybrid）
-
-一次性全量建库脚本，服务首次部署或数据重置时需要运行
+【RAG 标准流程】入库流程（已修复 is_deleted 问题）
 """
 
 import os
 import pymysql
 from langchain_chroma import Chroma
 from app.storage.embeddings import BGEEmbeddings
-
-# ←←← 统一调用清理 + 分块模块
 from app.storage.text_cleaner import preprocess_and_chunk
 
-# ── Step 1: Load 加载数据──────────────────────────────────────────────────────────────
+# ── Step 1: Load 加载数据 ──────────────────────────────────────────────
 def load_notes_from_mysql():
-    """Step 1: Load - 从 MySQL 读取全部未删除笔记（含作者信息）。"""
+    """Step 1: Load - 从 MySQL 读取全部未删除笔记"""
     conn = pymysql.connect(
         host=os.getenv("MYSQL_HOST", "127.0.0.1"),
         port=int(os.getenv("MYSQL_PORT", "3306")),
@@ -32,7 +24,7 @@ def load_notes_from_mysql():
             cursor.execute(
                 """
                 SELECT n.id, n.title, n.content, n.user_id,
-                       n.like_count, n.created_at,
+                       n.like_count, n.created_at, n.is_deleted,   # ← 新增这列！
                        u.nickname, u.username
                 FROM note n
                 LEFT JOIN user u ON n.user_id = u.id
@@ -45,11 +37,10 @@ def load_notes_from_mysql():
         conn.close()
 
 
-# ── Step 2+3: 转换成文档对象(内容+元数据) + 分块 ──────────────────────────────────
+# ── Step 2+3: 转换成文档对象 + 分块 ─────────────────────────────────────
 def notes_to_documents(notes):
     """
-    Step 2: Split - 调用独立清理 + 分块模块
-    每个笔记先清理 → 结构化分块 → 长度控制 → 过滤垃圾 chunk
+    Step 2: Split 
     """
     docs = []
     for note in notes:
@@ -61,51 +52,41 @@ def notes_to_documents(notes):
             "author": note["nickname"] or note["username"] or "",
             "like_count": note["like_count"] or 0,
             "created_at": str(note["created_at"]),
+            "is_deleted": int(note.get("is_deleted")),   # ← 关键修复！强制写入 0
         }
 
-        # 调用统一清理 + 分块入口（核心优化点）
+        # 调用统一清理 + 分块
         processed_chunks = preprocess_and_chunk(raw_content, metadata)
         docs.extend(processed_chunks)
 
     return docs
 
 
-# ── Step 4+5: chunks向量化 + 存储到向量数据库 ───────────────────────────────────────────
+# ── Step 4+5: 向量化 + 存储（保持不变） ─────────────────────────────────────
 def store_to_chroma(chunks, embeddings):
-    """
-    使用 Chroma.from_documents 一行完成：
-    - 向量化（dense）
-    - 创建 collection
-    - 持久化存储
-    """
     chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
     collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")
 
-    # 官方最佳实践：一行完成初始化 + 添加文档
+    # 清空旧库（保证新 metadata 生效）
+    import chromadb
+    try:
+        client = chromadb.PersistentClient(path=chroma_dir)
+        client.delete_collection(collection_name)
+        print(f"🗑️  旧索引已清空（metadata 将重新生成）")
+    except Exception:
+        pass
+
     vectorstore = Chroma.from_documents(
-        documents=chunks,                    # 你的 cleaned chunks
-        embedding=embeddings,                # BGEEmbeddings
-        persist_directory=chroma_dir,        # 本地持久化
-        collection_name=collection_name,     # 指定 collection 名
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=chroma_dir,
+        collection_name=collection_name,
     )
 
     print(f"✅ Chroma 索引库建库完成：{len(chunks)} 个 chunk")
 
 
 if __name__ == "__main__":
-    # ── 建库前先清空旧数据（保证幂等性）────────────────────
-    import chromadb
-    chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
-    collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")
-    
-    try:
-        client = chromadb.PersistentClient(path=chroma_dir)
-        client.delete_collection(collection_name)
-        print(f"🗑️  旧索引已清空：{collection_name}")
-    except Exception:
-        print("📭 未找到旧索引，直接建库")
-
-    # ── 正式建库 ──────────────────────────────────────────
     notes = load_notes_from_mysql()
     print(f"✅ Step 1: Load 完成 → 读取笔记：{len(notes)} 条")
 
@@ -114,4 +95,4 @@ if __name__ == "__main__":
 
     embeddings = BGEEmbeddings()
     store_to_chroma(docs, embeddings)
-    print(f"✅ 全量建库完成：{len(notes)} 条笔记 → {len(docs)} 个有效 chunk")
+    print(f"✅ 全量建库完成！现在 is_deleted 已正确写入 metadata")
