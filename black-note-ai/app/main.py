@@ -1,59 +1,56 @@
 """
-app/main.py
+app/main.py - 异步版
 
-按照官方文档 Streaming 页面的 version="v2" 写法。
+相对原版的变化：
+  1. generate() 从同步生成器改为异步生成器（async def + async for）
+  2. graph.stream 换成 graph.astream，整条链路全部异步，不占用线程池
+  3. chat() 端点改为 async def，配合异步生成器
+  4. get_state 改为 aget_state，避免在异步上下文里调用同步阻塞
 
-文档关键变化：
-  1. stream() 必须传 version="v2" 才能用新格式
-  2. 新格式每个 chunk 是 {"type": ..., "ns": ..., "data": ...}
-     文档原文：
-     "Pass version='v2' to stream() or astream() to get a unified output format.
-      Every chunk is a StreamPart dict with a consistent shape."
-  3. 过滤 messages 的写法变成：
-     if chunk["type"] == "messages":
-         msg, metadata = chunk["data"]
-  4. 过滤节点用 metadata["langgraph_node"]
-     文档原文：
-     "To stream tokens only from specific nodes, use stream_mode='messages'
-      and filter the outputs by the langgraph_node field in the metadata"
+最佳实践说明：
+  - FastAPI 本身是异步框架，同步阻塞调用（如 graph.stream）会占用线程池
+  - 高并发时线程池耗尽会导致新请求排队等待
+  - 改成 astream 后每个请求只占用一个协程，并发能力大幅提升
 """
 
 import os
+import logging
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
 
-from fastapi import Depends, FastAPI
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from langchain.messages import HumanMessage, SystemMessage
-from app.core.prompts import ROVER_SYSTEM_PROMPT     
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.core.graph import build_graph
 from app.auth import get_request_user_id
+from app.core.graph import build_graph
+from app.core.prompts import ROVER_SYSTEM_PROMPT
 from app.core.schemas import ChatRequest
-from app.storage.sync import get_vectorstore, sync_single_note, delete_note_from_vectorstore
-from app.storage.embeddings import _get_model  # 直接调单例初始化函数
-from fastapi import BackgroundTasks
+from app.storage.embeddings import _get_model
+from app.storage.sync import (
+    delete_note_from_vectorstore,
+    get_vectorstore,
+    sync_single_note,
+)
 
 load_dotenv()
 
-'''
-@asynccontextmanager是 Python 的异步上下文管理器装饰器，
-让你用 async def + yield 的写法来定义"启动时做什么、关闭时做什么"。
+# # 关掉 httpx 的 INFO 日志，避免每次 LLM 调用都打一行
+# logging.getLogger("httpx").setLevel(logging.WARNING)
 
-yield 是分界线：
 
-yield 之前 → 应用启动时执行
-yield 之后 → 应用关闭时执行
-'''
+# ── 启动 / 关闭生命周期 ───────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """只在启动时构建一次 graph，缓存到 app.state"""
     print("🚀 启动 AI 服务...")
-    _get_model()
-    app.state.graph = build_graph(get_vectorstore())
-    print("✅ AI 服务就绪")
-    yield
+    _get_model()                                       # 预热 bge-m3，避免第一次请求时才加载
+    # checkpointer 的生命周期和应用一致，应用关闭时才释放连接
+    async with AsyncSqliteSaver.from_conn_string("./checkpoints.db") as checkpointer:
+        app.state.graph = build_graph(get_vectorstore(), checkpointer)
+        print("✅ AI 服务就绪")
+        yield
     print("🛑 AI 服务关闭")
 
 
@@ -66,6 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ── 内部同步接口 ──────────────────────────────────────────────
 @app.post("/internal/sync-note")
 async def internal_sync_note(payload: dict, background_tasks: BackgroundTasks):
@@ -75,7 +73,6 @@ async def internal_sync_note(payload: dict, background_tasks: BackgroundTasks):
     if not note_id:
         return {"success": False, "message": "缺少 note_id"}
 
-    # 立刻返回给 Spring Boot，同步在后台执行
     if action == "delete":
         background_tasks.add_task(delete_note_from_vectorstore, note_id)
     else:
@@ -90,63 +87,70 @@ async def chat(
     req: ChatRequest,
     user_id: str = Depends(get_request_user_id),
 ):
-    graph = app.state.graph  # 复用全局单例
+    graph = app.state.graph
 
-    # 文档写法：thread_id 放在 configurable 里
-    # 同时把 user_id 也放进去，工具函数从这里取
     config = {
         "configurable": {
             "thread_id": f"{user_id}:{req.session_id}",
-            "user_id":   user_id,
+            "user_id": user_id,
         }
     }
-    def generate():
-        """
-        按文档 Streaming v2 写法，同时开 messages + updates 两个模式。
 
-        messages → 推送 LLM token（前端流式显示）
-        updates  → 推送节点状态变化（前端调试面板）
-
-        调试事件格式：[DEBUG:type:value]
-          [DEBUG:llm_call:1]          → LLM 第1次调用
-          [DEBUG:tool:search_notes]   → 调用了 search_notes 工具
-        """
+    # ── 异步生成器：核心改动 ──────────────────────────────────
+    # 原来：def generate() + for chunk in graph.stream(...)
+    # 现在：async def generate() + async for chunk in graph.astream(...)
+    #
+    # 好处：
+    #   - 不阻塞 event loop，FastAPI 可以同时处理其他请求
+    #   - 不占用线程池，高并发时不会出现线程耗尽
+    async def generate():
         try:
-            for chunk in graph.stream(
+            # 检查当前 thread 是否已有历史消息
+            # aget_state 是 get_state 的异步版，避免在异步上下文里调同步方法
+            saved = await graph.aget_state(config)
+            existing_messages = (
+                saved.values.get("messages", []) if saved.values else []
+            )
+
+            # 只有第一次对话（没有历史）才注入 SystemMessage
+            # checkpointer 会持久化，后续轮次自动携带，不需要重复注入
+            if not existing_messages:
+                input_messages = [
+                    SystemMessage(content=ROVER_SYSTEM_PROMPT),
+                    HumanMessage(content=req.question),
+                ]
+            else:
+                input_messages = [HumanMessage(content=req.question)]
+
+            # graph.astream 是 graph.stream 的异步版本
+            # async for 不阻塞，每个 chunk 到来时才恢复执行
+            async for chunk in graph.astream(
                 input={
-                    # 第一次对话：checkpointer 里没有历史，SystemMessage 会被写入持久化
-                    # 后续对话：checkpointer 已有历史，LangGraph 会把这里的消息 append 进去
-                    # 所以 SystemMessage 只在第一条消息时生效，不会重复累积
-                    "messages": [
-                        SystemMessage(content=ROVER_SYSTEM_PROMPT),
-                        HumanMessage(content=req.question),
-                    ],
-                    "user_id":   user_id,
-                    "llm_calls": 0,
+                    "messages": input_messages,
+                    "user_id": user_id,
+                    "llm_calls": 0,   # 每次新请求强制重置为 0
                 },
                 config=config,
-                stream_mode=["messages", "updates"],   # 文档写法：列表同时开多个模式
-                version="v2",                          # 文档要求，启用统一格式
+                stream_mode=["messages", "updates"],
+                version="v2",
             ):
-                # ── updates 模式：节点状态变化，用于调试面板 ──────────
+                # ── updates：调试面板事件 ──────────────────────
                 if chunk["type"] == "updates":
                     for node_name, update in chunk["data"].items():
                         if node_name == "llm_call":
                             calls = update.get("llm_calls", "?")
                             yield f"data: [DEBUG:llm_call:{calls}]\n\n"
 
-                            # ← 同时从这里取工具名，比从 ToolMessage 取更可靠
                             msgs = update.get("messages", [])
                             for m in msgs:
                                 for tc in getattr(m, "tool_calls", []):
                                     tool_name = tc.get("name", "tool")
                                     yield f"data: [DEBUG:tool:{tool_name}]\n\n"
-                # ── messages 模式：LLM token，用于流式显示 ────────────
+
+                # ── messages：LLM token 流式输出 ──────────────
                 elif chunk["type"] == "messages":
-                    # 文档写法：从 chunk["data"] 解包 (msg, metadata)
                     msg, metadata = chunk["data"]
 
-                    # 文档写法：用 metadata["langgraph_node"] 过滤节点
                     is_ai_text = (
                         metadata.get("langgraph_node") == "llm_call"
                         and msg.content
@@ -154,7 +158,7 @@ async def chat(
                     )
 
                     if is_ai_text:
-                        # 换行符转义，防止 SSE 协议把 \n 当分隔符吃掉
+                        # 换行符转义，防止 SSE 协议把 \n 当分隔符处理
                         content = msg.content.replace("\n", "\\n")
                         yield f"data: {content}\n\n"
 
@@ -162,6 +166,7 @@ async def chat(
             yield f"data: [ERROR] {str(e)}\n\n"
             print(f"Graph 执行错误: {e}")
 
+    # StreamingResponse 支持异步生成器，直接传入即可
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
