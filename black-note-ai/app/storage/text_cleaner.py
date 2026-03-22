@@ -79,7 +79,6 @@ def preprocess_and_chunk(raw_text: str, metadata: dict) -> List[Document]:
         # 过滤无效 chunk
         if len(content) >= 50 and re.search(r'[\w\u4e00-\u9fff]', content):
             chunk_metadata = metadata.copy()
-            chunk_metadata["original_content"] = raw_text  # ★ 存整篇原文供 LLM 使用
 
             final_chunks.append(Document(
                 page_content=content,       # 清洗版 → 用于 embedding 检索

@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "ai": "^6.0.134",
     "dompurify": "^3.3.3",
     "marked": "^17.0.4"
   }

@@ -25,22 +25,32 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from langchain.messages import HumanMessage
+from langchain.messages import HumanMessage, SystemMessage
+from app.core.prompts import ROVER_SYSTEM_PROMPT     
 
 from app.core.graph import build_graph
 from app.auth import get_request_user_id
 from app.core.schemas import ChatRequest
 from app.storage.sync import get_vectorstore, sync_single_note, delete_note_from_vectorstore
+from app.storage.embeddings import _get_model  # 直接调单例初始化函数
 from fastapi import BackgroundTasks
-from app.core.schemas import AgentContext
 
 load_dotenv()
 
+'''
+@asynccontextmanager是 Python 的异步上下文管理器装饰器，
+让你用 async def + yield 的写法来定义"启动时做什么、关闭时做什么"。
 
+yield 是分界线：
+
+yield 之前 → 应用启动时执行
+yield 之后 → 应用关闭时执行
+'''
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """只在启动时构建一次 graph，缓存到 app.state"""
     print("🚀 启动 AI 服务...")
+    _get_model()
     app.state.graph = build_graph(get_vectorstore())
     print("✅ AI 服务就绪")
     yield
@@ -104,7 +114,13 @@ async def chat(
         try:
             for chunk in graph.stream(
                 input={
-                    "messages":  [HumanMessage(content=req.question)],
+                    # 第一次对话：checkpointer 里没有历史，SystemMessage 会被写入持久化
+                    # 后续对话：checkpointer 已有历史，LangGraph 会把这里的消息 append 进去
+                    # 所以 SystemMessage 只在第一条消息时生效，不会重复累积
+                    "messages": [
+                        SystemMessage(content=ROVER_SYSTEM_PROMPT),
+                        HumanMessage(content=req.question),
+                    ],
                     "user_id":   user_id,
                     "llm_calls": 0,
                 },

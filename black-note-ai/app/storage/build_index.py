@@ -1,5 +1,5 @@
 """
-【RAG 标准流程】入库流程（已修复 is_deleted 问题）
+【RAG 标准流程】入库流程
 """
 
 import os
@@ -24,7 +24,7 @@ def load_notes_from_mysql():
             cursor.execute(
                 """
                 SELECT n.id, n.title, n.content, n.user_id,
-                       n.like_count, n.created_at, n.is_deleted,   # ← 新增这列！
+                       n.like_count, n.created_at, n.is_deleted, 
                        u.nickname, u.username
                 FROM note n
                 LEFT JOIN user u ON n.user_id = u.id
@@ -52,7 +52,7 @@ def notes_to_documents(notes):
             "author": note["nickname"] or note["username"] or "",
             "like_count": note["like_count"] or 0,
             "created_at": str(note["created_at"]),
-            "is_deleted": int(note.get("is_deleted")),   # ← 关键修复！强制写入 0
+            "is_deleted": int(note.get("is_deleted")), 
         }
 
         # 调用统一清理 + 分块
