@@ -35,9 +35,9 @@ def build_graph(vectorstore, checkpointer):
 
     # ── 初始化模型 ────────────────────────────────────────────────
     model = ChatOpenAI(
-        model=os.getenv("MIMO_MODEL"),
-        api_key=os.getenv("MIMO_API_KEY"),
-        base_url=os.getenv("MIMO_BASE_URL"),
+        model=os.getenv("DEEPSEEK_MODEL"),
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL"),
     )
 
     deepseek_model = ChatOpenAI(

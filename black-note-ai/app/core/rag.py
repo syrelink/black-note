@@ -22,36 +22,42 @@ import jieba
 
 load_dotenv()
 
-
-_retriever_cache: dict = {} 
-
 # app/core/rag.py
 
 _retriever_cache: dict = {}   # key = collection_name，value = retriever
 
-def make_rag_retriever(vectorstore: Chroma):
+def make_rag_retriever(vectorstore: Chroma, user_id: str = None):
     """
     构建混合检索器，结果缓存在模块变量里。
     同一个 vectorstore 只建一次，后续直接复用。
     """
-    cache_key = vectorstore._collection.name
+    cache_key = f"{vectorstore._collection.name}:{user_id}"
 
     if cache_key in _retriever_cache:
-        return _retriever_cache[cache_key]   # 直接返回缓存
+        return _retriever_cache[cache_key]
 
     # ── 第一次调用才真正构建 ──────────────────────────────
     vector_retriever = vectorstore.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 20},
+        search_kwargs={
+            "k": 20,
+            "filter": {
+                "$and": [
+                    {"user_id":    {"$eq": str(user_id)}},
+                    {"is_deleted": {"$eq": 0}},
+                ]
+            }
+        },
     )
 
-    result = vectorstore.get()
+    result = vectorstore.get(where={"user_id": str(user_id)})
     documents = [
         Document(page_content=text or "", metadata=meta or {})
         for text, meta in zip(
             result.get("documents", []),
             result.get("metadatas", []),
         )
+        if (meta or {}).get("is_deleted", 0) == 0
     ]
 
     def chinese_preprocess(text: str):
@@ -85,7 +91,7 @@ def rerank_docs(query: str, docs: List[Document], top_n: int = 6) -> List[Docume
         return docs[:top_n]
 
     try:
-        ranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2")
+        ranker = Ranker(model_name="BAAI/bge-reranker-v2-m3")
         results = ranker.rerank(RerankRequest(query=query.strip(), passages=passages))
 
         sorted_indices = sorted(

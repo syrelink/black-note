@@ -1,34 +1,21 @@
 """
-app/core/tools.py - 重构版 v6.1（全异步）
+app/core/tools.py - 重构版 v6.2
 
-重构原则：
-    工具 = LLM 自己做不到、必须借助外部的原子操作
-    每个工具对应一个数据源 + 一种查询方式，不承载任何分析意图
-
-v6.1 相对 v6.0 的变化：
-    - 数据库引擎从同步 create_engine (pymysql) 换成异步 create_async_engine (aiomysql)
-    - 所有工具函数改为 async def
-    - MySQL I/O 改为 await conn.execute(...)
-    - 向量检索（rag_retriever.invoke）用 asyncio.to_thread 包装，
-      保持与同步向量库的兼容性（如向量库已支持 ainvoke 可直接替换）
-
-依赖变化：
-    pip install aiomysql sqlalchemy[asyncio]
-    （移除 pymysql，或保留供其他模块使用）
+v6.2 相对 v6.1 的变化：
+    - make_tools 删除启动时预构建检索器的逻辑
+      原来：rag_retriever = make_rag_retriever(vectorstore)  ← 启动时执行，user_id 未知
+      现在：检索器在 search_notes 被调用时才按 user_id 动态构建，结果由 _retriever_cache 缓存
+    - search_notes 删除后置过滤逻辑（user_id / is_deleted 过滤已前置到检索器内部）
 
 保留的工具（3个）：
-    1. search_notes   向量库语义检索（LLM 做不到的模糊匹配）
+    1. search_notes   向量库语义检索
     2. get_note       MySQL 按 ID 精确读取完整笔记
     3. get_note_stats MySQL 聚合统计
-
-分析、总结、审阅、串联规律 —— 这些都是 LLM 的推理行为，在 system prompt 里指导即可，
-不需要用额外工具来"包装意图"。
 """
 
 import asyncio
 import json
 import os
-from typing import List
 
 from dotenv import load_dotenv
 from langchain.tools import tool
@@ -40,9 +27,6 @@ from app.core.rag import make_rag_retriever, rerank_docs
 
 load_dotenv()
 
-# ── 异步引擎 ──────────────────────────────────────────────────────────────
-# 驱动从 pymysql 换成 aiomysql，URL scheme 改为 mysql+aiomysql://
-# 依赖：pip install aiomysql sqlalchemy[asyncio]
 _ASYNC_ENGINE = create_async_engine(
     os.getenv(
         "MYSQL_ASYNC_URL",
@@ -50,21 +34,20 @@ _ASYNC_ENGINE = create_async_engine(
     ),
     pool_size=5,
     max_overflow=10,
-    # echo=True,  # 调试时可开启，打印 SQL
 )
 
 
 def make_tools(vectorstore):
     """
     工具工厂函数，启动时调用一次。
-    返回 (tools_list, tools_by_name)。
+
+    注意：不在这里构建检索器。
+    检索器依赖 user_id，启动时 user_id 未知，
+    必须等请求进来才能按用户构建。
+    vectorstore 引用传进来供工具函数闭包使用。
     """
-    rag_retriever = make_rag_retriever(vectorstore)
 
     # ── 工具 1：向量语义检索 ───────────────────────────────────────────────
-    # 向量库当前只提供同步 invoke，用 asyncio.to_thread 放入线程池，
-    # 避免阻塞 event loop。若向量库升级支持 ainvoke，可直接替换为：
-    #   raw_docs = await rag_retriever.ainvoke(query)
     @tool
     async def search_notes(
         query: str,
@@ -82,31 +65,30 @@ def make_tools(vectorstore):
         """
         user_id = config.get("configurable", {}).get("user_id")
         try:
-            # 同步向量库放入线程池，避免阻塞 event loop
-            raw_docs: List = await asyncio.to_thread(rag_retriever.invoke, query)
+            # 请求时才构建检索器，此时 user_id 已知
+            # make_rag_retriever 内部有 _retriever_cache，同一用户只构建一次
+            # 过滤（user_id + is_deleted）已前置到检索器内部，不需要后置过滤
+            retriever = make_rag_retriever(vectorstore, user_id=user_id)
 
-            # 只保留当前用户且未删除的文档
-            user_docs = [
-                doc for doc in raw_docs
-                if str(doc.metadata.get("user_id")) == str(user_id)
-                and doc.metadata.get("is_deleted") == 0
-            ]
+            # 同步检索放入线程池，避免阻塞 event loop
+            raw_docs = await asyncio.to_thread(retriever.invoke, query)
 
-            # rerank 也是 CPU 密集型同步操作，同样放入线程池
-            reranked = await asyncio.to_thread(rerank_docs, query, user_docs, limit * 2)
+            # rerank 是 CPU 密集型同步操作，同样放入线程池
+            reranked = await asyncio.to_thread(
+                rerank_docs, query, raw_docs, top_n=limit
+            )
 
             seen = set()
             notes = []
-            for doc in reranked[:limit]:
+            for doc in reranked:
                 note_id = doc.metadata.get("note_id")
                 if note_id and note_id not in seen:
                     seen.add(note_id)
                     meta = doc.metadata
                     notes.append({
-                        "note_id": note_id,
-                        "title": meta.get("title", "无标题"),
+                        "note_id":    note_id,
+                        "title":      meta.get("title", "无标题"),
                         "created_at": str(meta.get("created_at", "")),
-                        # snippet 用于快速预览，LLM 可据此决定是否需要调用 get_note 读完整内容
                         "snippet": (
                             doc.page_content[:400] + "..."
                             if len(doc.page_content) > 400
@@ -155,11 +137,11 @@ def make_tools(vectorstore):
 
             return json.dumps(
                 {
-                    "note_id": note_id,
-                    "title": row[0],
-                    "content": row[1],
+                    "note_id":    note_id,
+                    "title":      row[0],
+                    "content":    row[1],
                     "created_at": str(row[2]),
-                    "images": row[3],
+                    "images":     row[3],
                 },
                 ensure_ascii=False,
             )
@@ -183,36 +165,23 @@ def make_tools(vectorstore):
         user_id = config.get("configurable", {}).get("user_id")
         try:
             async with _ASYNC_ENGINE.connect() as conn:
-                total = (
-                    await conn.execute(
-                        text("SELECT COUNT(*) FROM note WHERE user_id=:uid AND is_deleted=0"),
-                        {"uid": user_id},
-                    )
-                ).scalar()
-
-                latest = (
-                    await conn.execute(
-                        text("SELECT MAX(created_at) FROM note WHERE user_id=:uid AND is_deleted=0"),
-                        {"uid": user_id},
-                    )
-                ).scalar()
-
-                this_month = (
-                    await conn.execute(
-                        text("""
-                            SELECT COUNT(*) FROM note
-                            WHERE user_id=:uid AND is_deleted=0
-                            AND created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
-                        """),
-                        {"uid": user_id},
-                    )
-                ).scalar()
+                row = (await conn.execute(
+                    text("""
+                        SELECT
+                            COUNT(*)                                                  AS total,
+                            MAX(created_at)                                           AS latest,
+                            SUM(created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AS this_month
+                        FROM note
+                        WHERE user_id=:uid AND is_deleted=0
+                    """),
+                    {"uid": user_id},
+                )).fetchone()
 
             return json.dumps(
                 {
-                    "total": total,
-                    "latest": str(latest) if latest else None,
-                    "this_month": this_month,
+                    "total":      row[0],
+                    "latest":     str(row[1]) if row[1] else None,
+                    "this_month": row[2],
                 },
                 ensure_ascii=False,
             )

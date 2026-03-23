@@ -1,5 +1,5 @@
 """
-tests/eval_prompt.py - Prompt A/B 测试 v4
+tests/eval_prompt_result.py - Prompt A/B 测试 v4
 
 v4 修正：
   1. 澄清判断不再依赖问号，改为"无工具调用 + 有回复内容 + 澄清关键词"三重判断
@@ -460,9 +460,9 @@ if __name__ == "__main__":
 
     print_report(result_a, result_b)
 
-    with open("eval_result.json", "w", encoding="utf-8") as f:
+    with open("eval_prompt_result.json", "w", encoding="utf-8") as f:
         json.dump(
             {"prompt_a": result_a, "prompt_b": result_b},
             f, ensure_ascii=False, indent=2,
         )
-    print("📁 完整结果已保存到 eval_result.json")
+    print("📁 完整结果已保存到 eval_prompt_result.json")

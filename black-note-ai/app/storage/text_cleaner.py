@@ -16,8 +16,9 @@ def clean_text(text: str) -> str:
         return ""
 
     text = "".join(c for c in text if c.isprintable())
-    text = re.sub(r"\s+", " ", text.strip())
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    # 只清理多余空行，保留单个换行（Markdown 结构依赖换行）
+    text = re.sub(r" +", " ", text.strip())   # 只压缩空格，不动换行
+    text = re.sub(r"\n{3,}", "\n\n", text)    # 3个以上换行压成2个
 
     # 删除常见垃圾
     text = re.sub(r"^\s*[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)  # 分隔线
