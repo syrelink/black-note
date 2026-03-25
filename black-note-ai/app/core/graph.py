@@ -76,7 +76,7 @@ def build_graph(vectorstore, checkpointer):
         messages = state["messages"]
 
         # token 未超限，直接结束，不做任何操作
-        if count_tokens_approximately(messages) < 45000:
+        if count_tokens_approximately(messages) < 60000:
             return {}
 
         # 超限：保留最近 24 条，压缩其余早期消息

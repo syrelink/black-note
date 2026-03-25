@@ -45,7 +45,7 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 启动 AI 服务...")
-    _get_model()                                       # 预热 bge-m3，避免第一次请求时才加载
+    _get_model()   # 预热 bge-m3，避免第一次请求时才加载
     # checkpointer 的生命周期和应用一致，应用关闭时才释放连接
     async with AsyncSqliteSaver.from_conn_string("./checkpoints.db") as checkpointer:
         app.state.graph = build_graph(get_vectorstore(), checkpointer)

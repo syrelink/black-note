@@ -149,7 +149,44 @@ def make_tools(vectorstore):
         except Exception as e:
             return json.dumps({"error": f"读取失败：{str(e)}"}, ensure_ascii=False)
 
-    # ── 工具 3：聚合统计 ──────────────────────────────────────────────────
+    # ── 工具 4：获取全量标题列表 ──────────────────────────────────────────
+    @tool
+    async def get_all_titles(config: RunnableConfig = None) -> str:
+        """
+        获取用户所有笔记的标题列表、创建时间、获赞数量（不含正文），按创建时间倒序排列。
+        无参数。
+
+        返回：JSON，包含 notes 数组（note_id、title、created_at、like_count）和 total。
+        """
+        user_id = config.get("configurable", {}).get("user_id")
+        try:
+            async with _ASYNC_ENGINE.connect() as conn:
+                rows = (await conn.execute(
+                    text("""
+                        SELECT id, title, created_at, like_count
+                        FROM note
+                        WHERE user_id = :uid AND is_deleted = 0
+                        ORDER BY created_at DESC
+                    """),
+                    {"uid": user_id},
+                )).fetchall()
+ 
+            notes = [
+                {
+                    "note_id":    row[0],
+                    "title":      row[1],
+                    "created_at": str(row[2]),
+                    "like_count": row[3],
+                }
+                for row in rows
+            ]
+ 
+            return json.dumps({"notes": notes, "total": len(notes)}, ensure_ascii=False)
+ 
+        except Exception as e:
+            return json.dumps({"error": f"获取标题失败：{str(e)}"}, ensure_ascii=False)
+
+
     @tool
     async def get_note_stats(config: RunnableConfig = None) -> str:
         """
@@ -190,7 +227,7 @@ def make_tools(vectorstore):
             return json.dumps({"error": f"统计失败：{str(e)}"}, ensure_ascii=False)
 
     # ── 导出 ──────────────────────────────────────────────────────────────
-    tools = [search_notes, get_note, get_note_stats]
+    tools = [search_notes, get_note, get_all_titles, get_note_stats]
     tools_by_name = {t.name: t for t in tools}
 
     return tools, tools_by_name
