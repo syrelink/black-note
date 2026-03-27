@@ -31,6 +31,27 @@ black-note-server/logs/
 *.log
 
 # ==========================================
+# LangGraph / LangChain 相关（重点新增）
+# ==========================================
+# SQLite Checkpointer 数据库（非常大，禁止提交）
+*.db
+checkpoints.db
+black-note-ai/checkpoints.db
+black-note-ai/*.db
+
+# LangGraph 持久化目录（如果有）
+checkpoints/
+langgraph_checkpoints/
+*.sqlite
+*.sqlite3
+
+# LangChain / LangGraph 缓存和临时文件
+.langchain/
+.langgraph/
+*.pickle
+*.pkl
+
+# ==========================================
 # IDE / 编辑器配置文件 (非常重要)
 # ==========================================
 .idea/
@@ -51,8 +72,28 @@ black-note-server/logs/
 *.pem
 
 # ==========================================
-# 依赖锁文件 (建议保留其中一个)
+# Python 项目通用忽略（推荐添加）
 # ==========================================
-# 如果你团队统一使用 npm，就保留 package-lock.json，忽略 yarn.lock
-# yarn.lock
-# pnpm-lock.yaml
+# 虚拟环境
+venv/
+env/
+.venv/
+ENV/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 包管理
+*.egg-info/
+dist/
+build/
+*.whl
+*.tar.gz
+
+# 测试和覆盖率
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
