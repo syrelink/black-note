@@ -1,16 +1,7 @@
 """
-app/main.py - 异步版
+app/main.py 
 
-相对原版的变化：
-  1. generate() 从同步生成器改为异步生成器（async def + async for）
-  2. graph.stream 换成 graph.astream，整条链路全部异步，不占用线程池
-  3. chat() 端点改为 async def，配合异步生成器
-  4. get_state 改为 aget_state，避免在异步上下文里调用同步阻塞
-
-最佳实践说明：
-  - FastAPI 本身是异步框架，同步阻塞调用（如 graph.stream）会占用线程池
-  - 高并发时线程池耗尽会导致新请求排队等待
-  - 改成 astream 后每个请求只占用一个协程，并发能力大幅提升
+  uvicorn app.main:app --port 8001 --reload
 """
 
 import os
@@ -18,6 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+load_dotenv()
 from fastapi import Depends, FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -35,7 +27,6 @@ from app.storage.sync import (
     sync_single_note,
 )
 
-load_dotenv()
 
 # # 关掉 httpx 的 INFO 日志，避免每次 LLM 调用都打一行
 # logging.getLogger("httpx").setLevel(logging.WARNING)

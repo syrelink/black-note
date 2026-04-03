@@ -6,7 +6,8 @@ from sentence_transformers import SentenceTransformer
 
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
-
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 # ==================== 全局单例（只加载一次） ====================
 _model = None
