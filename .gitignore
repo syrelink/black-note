@@ -31,25 +31,33 @@ black-note-server/logs/
 *.log
 
 # ==========================================
-# LangGraph / LangChain 相关（重点新增）
+# LangGraph / LangChain 相关
 # ==========================================
-# SQLite Checkpointer 数据库（非常大，禁止提交）
+# SQLite Checkpointer 数据库（已迁移到 MongoDB，仍忽略遗留文件）
 *.db
-checkpoints.db
-black-note-ai/checkpoints.db
-black-note-ai/*.db
-
-# LangGraph 持久化目录（如果有）
-checkpoints/
-langgraph_checkpoints/
 *.sqlite
 *.sqlite3
 
-# LangChain / LangGraph 缓存和临时文件
+# LangGraph 持久化目录
+checkpoints/
+langgraph_checkpoints/
+
+# LangChain / LangGraph 缓存
 .langchain/
 .langgraph/
 *.pickle
 *.pkl
+
+# ==========================================
+# 向量库本地数据（不提交到版本控制）
+# ==========================================
+# ChromaDB（旧，已迁移到 Qdrant）
+chroma_db/
+chromadb_db/
+
+# Qdrant 本地数据目录（docker volume 或 ./qdrant_storage）
+qdrant_storage/
+.qdrant/
 
 # ==========================================
 # IDE / 编辑器配置文件 (非常重要)

@@ -1,15 +1,35 @@
+# ── Web 框架 ──────────────────────────────────────────────────────
 fastapi
 uvicorn[standard]
+python-multipart          # 文件上传 (UploadFile)
 python-dotenv
 
+# ── 数据库（MongoDB）─────────────────────────────────────────────
+motor                     # async MongoDB driver
+beanie                    # ODM for Motor (Pydantic Document)
+
+# ── 向量库（Qdrant）──────────────────────────────────────────────
+qdrant-client             # Qdrant Python client (sync + async)
+langchain-qdrant          # LangChain QdrantVectorStore
+
+# ── 缓存 ──────────────────────────────────────────────────────────
+redis[asyncio]            # redis-py async 支持
+
+# ── 认证 / 密码 ────────────────────────────────────────────────────
+passlib[bcrypt]           # BCrypt 密码哈希
+
+# ── 文件存储 ──────────────────────────────────────────────────────
+minio                     # MinIO Python SDK
+
+# ── AI / RAG ──────────────────────────────────────────────────────
 langchain
 langchain-openai
-langchain-chroma
-
-chromadb
+langchain-community
+langchain-classic
 sentence-transformers
+langgraph
+langgraph-checkpoint-mongodb  # MongoDB checkpointer for LangGraph
 
-pymysql
-SQLAlchemy
-
-redis
+# ── 异步任务队列 ──────────────────────────────────────────────────
+celery[redis]             # Celery + Redis broker/backend
+flower                    # Celery 可视化监控（可选）

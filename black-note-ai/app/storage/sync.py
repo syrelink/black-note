@@ -1,171 +1,162 @@
 """
-增量同步模块（app/storage/sync.py）
-新笔记发布/编辑/删除时，同步更新 ChromaDB。
+app/storage/sync.py
 
-核心优化：
-1. BGEEmbeddings 和 Chroma 实例改为模块级单例
-   → 服务启动时只加载一次 bge-m3 模型，后续同步无需重载
-2. sync_single_note / delete_note_from_vectorstore 复用全局实例
-   → 发布笔记速度从"等几秒"变成"毫秒级"
-3. main.py 里用 BackgroundTasks 异步执行同步
-   → Spring Boot 调完接口立刻拿到响应，用户无感知
+增量向量同步（MongoDB → Qdrant）。
+
+全局单例：
+  - BGEEmbeddings（bge-m3，约 60MB，只加载一次）
+  - QdrantVectorStore（sync，供 FastAPI/RAG 检索复用）
+  - AsyncQdrantClient（async，供 Celery worker 写入 Qdrant）
+
+sync_single_note / delete_note_from_vectorstore 都是 async，
+由 Celery worker 通过 asyncio.run() 调用。
 """
 
-import os
-from typing import Optional
+import uuid
+import logging
+from uuid import UUID
 
-import chromadb
-import pymysql
-from langchain_chroma import Chroma
-from langchain_core.documents import Document
+from qdrant_client import AsyncQdrantClient, QdrantClient
+from qdrant_client.models import (
+    Distance,
+    Filter,
+    FieldCondition,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
+from langchain_qdrant import QdrantVectorStore
 
+from app.config import settings
 from app.storage.embeddings import BGEEmbeddings
 from app.storage.text_cleaner import preprocess_and_chunk
 
+logger = logging.getLogger(__name__)
 
-# ── 配置（与全量建库保持一致）────────────────────────────────
-CHROMA_DIR       = os.getenv("CHROMA_DIR",       "./chroma_db")
-COLLECTION_NAME  = os.getenv("CHROMA_COLLECTION", "black_note_all")
+# Deterministic UUID namespace for point IDs
+_NS = UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
-DB_CONFIG = {
-    "host":     os.getenv("MYSQL_HOST",     "127.0.0.1"),
-    "port":     int(os.getenv("MYSQL_PORT", "3306")),
-    "user":     os.getenv("MYSQL_USER",     "root"),
-    "password": os.getenv("MYSQL_PASSWORD", "123456"),
-    "database": os.getenv("MYSQL_DB",       "black_note"),
-    "charset":  "utf8mb4",
-}
-
-
-# ── 模块级单例：整个服务生命周期只初始化一次 ─────────────────
-# bge-m3 模型约 60MB，每次重新加载要好几秒，缓存后复用即可
-_embeddings:  BGEEmbeddings | None = None
-_vectorstore: Chroma | None        = None
+_embeddings:       BGEEmbeddings | None        = None
+_sync_qdrant:      QdrantClient | None         = None
+_async_qdrant:     AsyncQdrantClient | None    = None
+_vectorstore:      QdrantVectorStore | None    = None
 
 
 def get_embeddings() -> BGEEmbeddings:
-    """获取全局 embeddings 单例，首次调用时加载模型"""
     global _embeddings
     if _embeddings is None:
         _embeddings = BGEEmbeddings()
     return _embeddings
 
 
-def get_vectorstore() -> Chroma:
-    """获取全局 vectorstore 单例，复用同一个 embeddings 实例"""
+def get_sync_qdrant_client() -> QdrantClient:
+    global _sync_qdrant
+    if _sync_qdrant is None:
+        _sync_qdrant = QdrantClient(url=settings.QDRANT_URL)
+        _ensure_collection(_sync_qdrant)
+    return _sync_qdrant
+
+
+def _get_async_qdrant_client() -> AsyncQdrantClient:
+    global _async_qdrant
+    if _async_qdrant is None:
+        _async_qdrant = AsyncQdrantClient(url=settings.QDRANT_URL)
+    return _async_qdrant
+
+
+def _ensure_collection(client: QdrantClient) -> None:
+    """Create collection if it doesn't exist yet."""
+    existing = [c.name for c in client.get_collections().collections]
+    if settings.QDRANT_COLLECTION not in existing:
+        client.create_collection(
+            collection_name=settings.QDRANT_COLLECTION,
+            vectors_config=VectorParams(size=settings.QDRANT_VECTOR_SIZE, distance=Distance.COSINE),
+        )
+        logger.info("Qdrant 集合已创建: %s", settings.QDRANT_COLLECTION)
+
+
+def get_vectorstore() -> QdrantVectorStore:
     global _vectorstore
     if _vectorstore is None:
-        _vectorstore = Chroma(
-            persist_directory=CHROMA_DIR,
-            embedding_function=get_embeddings(),   # 复用，不重建
-            collection_name=COLLECTION_NAME,
+        _vectorstore = QdrantVectorStore(
+            client=get_sync_qdrant_client(),
+            collection_name=settings.QDRANT_COLLECTION,
+            embedding=get_embeddings(),
         )
     return _vectorstore
 
 
-# ── 内部工具函数 ──────────────────────────────────────────────
+# ── Celery worker 使用的 async 同步函数 ──────────────────────────
 
-def _fetch_note(note_id: int) -> Optional[dict]:
-    """从 MySQL 查询单条未删除笔记（含作者信息）"""
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT n.id, n.title, n.content, n.user_id,
-                       n.like_count, n.created_at,
-                       u.nickname, u.username
-                FROM note n
-                LEFT JOIN user u ON n.user_id = u.id
-                WHERE n.id = %s AND n.is_deleted = 0
-                """,
-                (note_id,),
-            )
-            return cursor.fetchone()
-    except Exception as e:
-        print(f"查询笔记 {note_id} 失败: {e}")
-        return None
-    finally:
-        conn.close()
+async def sync_single_note(note_id: str) -> bool:
+    """新建或更新笔记：从 MongoDB 读取，嵌入后写入 Qdrant。"""
+    from bson import ObjectId
+    from app.database import get_motor_client
 
-
-# ── 核心同步函数 ──────────────────────────────────────────────
-
-def sync_single_note(note_id: int) -> bool:
-    """
-    新增/更新笔记的完整同步流程：
-    Load → 清理分块 → 删旧 → 写新 → 清 BM25 缓存
-
-    由 main.py 的 BackgroundTasks 异步调用，不阻塞 HTTP 响应。
-    """
-    try:
-        note = _fetch_note(note_id)
-        if not note:
-            print(f"笔记 {note_id} 不存在或已删除，跳过同步")
-            return False
-
-        raw_content = f"{note['title']}\n{note['content']}"
-        metadata = {
-            "note_id":    str(note["id"]),
-            "title":      note["title"] or "",
-            "user_id":    str(note["user_id"]),
-            "author":     note["nickname"] or note["username"] or "",
-            "like_count": note["like_count"] or 0,
-            "created_at": str(note["created_at"]),
-        }
-
-        chunks = preprocess_and_chunk(raw_content, metadata)
-        if not chunks:
-            print(f"笔记 {note_id} 预处理后无有效 chunk，跳过同步")
-            return False
-
-        # 复用全局 vectorstore，不重新加载模型
-        vs = get_vectorstore()
-
-        # 先删旧 chunk（保证幂等性）
-        client     = chromadb.PersistentClient(path=CHROMA_DIR)
-        collection = client.get_collection(COLLECTION_NAME)
-        collection.delete(where={"note_id": str(note_id)})
-
-        # 写入新 chunk
-        vs.add_documents(chunks)
-
-        # 清除 BM25 缓存，下次搜索时重建（含新笔记）
-        from app.core.rag import _retriever_cache
-        _retriever_cache.clear()
-
-        print(f"✅ 笔记 {note_id} 增量同步成功（{len(chunks)} 个有效 chunk）")
-        return True
-
-    except Exception as e:
-        print(f"❌ 笔记 {note_id} 同步失败：{str(e)}")
+    db   = get_motor_client()[settings.MONGODB_DB]
+    note = await db.notes.find_one({"_id": ObjectId(note_id), "is_deleted": False})
+    if not note:
+        logger.info("笔记 %s 不存在或已删除，跳过同步", note_id)
         return False
 
+    user = await db.users.find_one({"_id": note["user_id"]})
+    raw_content = f"{note['title']}\n{note.get('content', '') or ''}"
+    metadata = {
+        "note_id":    note_id,
+        "title":      note.get("title") or "",
+        "user_id":    str(note["user_id"]),
+        "author":     ((user.get("nickname") or user.get("username")) if user else "") or "",
+        "like_count": note.get("like_count", 0),
+        "created_at": str(note.get("created_at", "")),
+    }
 
-def delete_note_from_vectorstore(note_id: int) -> bool:
-    """
-    删除笔记：按 note_id 删除所有相关 chunk，并清除 BM25 缓存
-
-    由 main.py 的 BackgroundTasks 异步调用，不阻塞 HTTP 响应。
-    """
-    try:
-        client     = chromadb.PersistentClient(path=CHROMA_DIR)
-        collection = client.get_or_create_collection(COLLECTION_NAME)
-        result     = collection.delete(where={"note_id": str(note_id)})
-
-        deleted_count = result.get("deleted", 0) if isinstance(result, dict) else 0
-
-        if deleted_count > 0:
-            print(f"✅ 笔记 {note_id} 已删除（移除 {deleted_count} 个 chunk）")
-        else:
-            print(f"⚠️  笔记 {note_id} 在向量库中无匹配 chunk")
-
-        # 清除 BM25 缓存
-        from app.core.rag import _retriever_cache
-        _retriever_cache.clear()
-
-        return True
-
-    except Exception as e:
-        print(f"❌ 删除笔记 {note_id} 失败：{str(e)}")
+    chunks = preprocess_and_chunk(raw_content, metadata)
+    if not chunks:
+        logger.info("笔记 %s 无有效 chunk，跳过同步", note_id)
         return False
+
+    qdrant = _get_async_qdrant_client()
+
+    # Delete stale chunks first (idempotent)
+    await qdrant.delete(
+        collection_name=settings.QDRANT_COLLECTION,
+        points_selector=Filter(
+            must=[FieldCondition(key="note_id", match=MatchValue(value=note_id))]
+        ),
+    )
+
+    # Embed and upsert
+    emb     = get_embeddings()
+    texts   = [c.page_content for c in chunks]
+    vectors = emb.embed_documents(texts)
+    points  = [
+        PointStruct(
+            id=str(uuid.uuid5(_NS, f"{note_id}:{i}")),
+            vector=vectors[i],
+            payload={"page_content": texts[i], **chunks[i].metadata},
+        )
+        for i in range(len(chunks))
+    ]
+    await qdrant.upsert(collection_name=settings.QDRANT_COLLECTION, points=points)
+
+    # Clear BM25 retriever cache
+    from app.core.rag import _retriever_cache
+    _retriever_cache.clear()
+
+    logger.info("笔记 %s 向量同步完成（%d 个 chunk）", note_id, len(chunks))
+    return True
+
+
+async def delete_note_from_vectorstore(note_id: str) -> bool:
+    """从 Qdrant 删除笔记的所有 chunk。"""
+    qdrant = _get_async_qdrant_client()
+    await qdrant.delete(
+        collection_name=settings.QDRANT_COLLECTION,
+        points_selector=Filter(
+            must=[FieldCondition(key="note_id", match=MatchValue(value=note_id))]
+        ),
+    )
+    from app.core.rag import _retriever_cache
+    _retriever_cache.clear()
+    logger.info("笔记 %s 已从 Qdrant 删除", note_id)
+    return True

@@ -1,98 +1,111 @@
 """
-【RAG 标准流程】入库流程
+【RAG 标准流程】全量建库
+
+从 MongoDB 读取全部未删除笔记，分块嵌入后写入 Qdrant。
+运行命令：python -m app.storage.build_index
 """
 
+import asyncio
 import os
-import pymysql
-from langchain_chroma import Chroma
+
+from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorClient
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+
+from app.config import settings
 from app.storage.embeddings import BGEEmbeddings
 from app.storage.text_cleaner import preprocess_and_chunk
 
-# ── Step 1: Load 加载数据 ──────────────────────────────────────────────
-def load_notes_from_mysql():
-    """Step 1: Load - 从 MySQL 读取全部未删除笔记"""
-    conn = pymysql.connect(
-        host=os.getenv("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", "123456"),
-        database=os.getenv("MYSQL_DB", "black_note"),
-        charset="utf8mb4",
-    )
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT n.id, n.title, n.content, n.user_id,
-                       n.like_count, n.created_at, n.is_deleted, 
-                       u.nickname, u.username
-                FROM note n
-                LEFT JOIN user u ON n.user_id = u.id
-                WHERE n.is_deleted = 0
-                ORDER BY n.created_at DESC
-                """
-            )
-            return cursor.fetchall()
-    finally:
-        conn.close()
+import uuid
+from uuid import UUID
+
+_NS = UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 
-# ── Step 2+3: 转换成文档对象 + 分块 ─────────────────────────────────────
+async def load_notes_from_mongodb():
+    """Step 1: Load — 从 MongoDB 读取全部未删除笔记（含作者信息）。"""
+    client = AsyncIOMotorClient(settings.MONGODB_URL)
+    db     = client[settings.MONGODB_DB]
+
+    pipeline = [
+        {"$match": {"is_deleted": False}},
+        {"$sort":  {"created_at": -1}},
+        {"$lookup": {
+            "from":         "users",
+            "localField":   "user_id",
+            "foreignField": "_id",
+            "as":           "author_docs",
+        }},
+        {"$addFields": {"author": {"$arrayElemAt": ["$author_docs", 0]}}},
+        {"$project":   {"author_docs": 0}},
+    ]
+
+    notes = await db.notes.aggregate(pipeline).to_list(None)
+    client.close()
+    return notes
+
+
 def notes_to_documents(notes):
-    """
-    Step 2: Split 
-    """
+    """Step 2+3: 转换 + 分块。"""
     docs = []
     for note in notes:
-        raw_content = f"{note['title']}\n{note['content']}"
+        author = note.get("author") or {}
+        raw_content = f"{note['title']}\n{note.get('content', '') or ''}"
         metadata = {
-            "note_id": str(note["id"]),
-            "title": note["title"] or "",
-            "user_id": str(note["user_id"]),
-            "author": note["nickname"] or note["username"] or "",
-            "like_count": note["like_count"] or 0,
-            "created_at": str(note["created_at"]),
-            "is_deleted": int(note.get("is_deleted")), 
+            "note_id":    str(note["_id"]),
+            "title":      note.get("title") or "",
+            "user_id":    str(note["user_id"]),
+            "author":     author.get("nickname") or author.get("username") or "",
+            "like_count": note.get("like_count", 0),
+            "created_at": str(note.get("created_at", "")),
         }
-
-        # 调用统一清理 + 分块
-        processed_chunks = preprocess_and_chunk(raw_content, metadata)
-        docs.extend(processed_chunks)
-
+        docs.extend(preprocess_and_chunk(raw_content, metadata))
     return docs
 
 
-# ── Step 4+5: 向量化 + 存储（保持不变） ─────────────────────────────────────
-def store_to_chroma(chunks, embeddings):
-    chroma_dir = os.getenv("CHROMA_DIR", "./chroma_db")
-    collection_name = os.getenv("CHROMA_COLLECTION", "black_note_all")
+def store_to_qdrant(chunks, embeddings: BGEEmbeddings) -> None:
+    """Step 4+5: 嵌入 + 写入 Qdrant（全量重建）。"""
+    client = QdrantClient(url=settings.QDRANT_URL)
 
-    # 清空旧库（保证新 metadata 生效）
-    import chromadb
-    try:
-        client = chromadb.PersistentClient(path=chroma_dir)
-        client.delete_collection(collection_name)
-        print(f"🗑️  旧索引已清空（metadata 将重新生成）")
-    except Exception:
-        pass
+    # Recreate collection for a clean slate
+    existing = [c.name for c in client.get_collections().collections]
+    if settings.QDRANT_COLLECTION in existing:
+        client.delete_collection(settings.QDRANT_COLLECTION)
+        print("旧 Qdrant 集合已清空")
 
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=chroma_dir,
-        collection_name=collection_name,
+    client.create_collection(
+        collection_name=settings.QDRANT_COLLECTION,
+        vectors_config=VectorParams(size=settings.QDRANT_VECTOR_SIZE, distance=Distance.COSINE),
     )
 
-    print(f"✅ Chroma 索引库建库完成：{len(chunks)} 个 chunk")
+    batch_size = 64
+    total = len(chunks)
+    for start in range(0, total, batch_size):
+        batch = chunks[start : start + batch_size]
+        texts   = [c.page_content for c in batch]
+        vectors = embeddings.embed_documents(texts)
+        points  = [
+            PointStruct(
+                id=str(uuid.uuid5(_NS, f"{batch[i].metadata['note_id']}:{start + i}")),
+                vector=vectors[i],
+                payload={"page_content": texts[i], **batch[i].metadata},
+            )
+            for i in range(len(batch))
+        ]
+        client.upsert(collection_name=settings.QDRANT_COLLECTION, points=points)
+        print(f"  上传 {min(start + batch_size, total)}/{total} chunks")
+
+    client.close()
+    print(f"Qdrant 全量建库完成：{total} 个 chunk")
 
 
 if __name__ == "__main__":
-    notes = load_notes_from_mysql()
-    print(f"✅ Step 1: Load 完成 → 读取笔记：{len(notes)} 条")
+    notes = asyncio.run(load_notes_from_mongodb())
+    print(f"Step 1 完成 → 读取笔记：{len(notes)} 条")
 
-    docs = notes_to_documents(notes)
-    print(f"✅ Step 2: Split + 清理完成 → 有效 chunk：{len(docs)} 个")
+    chunks = notes_to_documents(notes)
+    print(f"Step 2+3 完成 → 有效 chunk：{len(chunks)} 个")
 
-    embeddings = BGEEmbeddings()
-    store_to_chroma(docs, embeddings)
-    print(f"✅ 全量建库完成！现在 is_deleted 已正确写入 metadata")
+    emb = BGEEmbeddings()
+    store_to_qdrant(chunks, emb)

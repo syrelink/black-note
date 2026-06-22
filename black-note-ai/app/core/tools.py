@@ -1,53 +1,26 @@
 """
-app/core/tools.py - 重构版 v6.2
+app/core/tools.py
 
-v6.2 相对 v6.1 的变化：
-    - make_tools 删除启动时预构建检索器的逻辑
-      原来：rag_retriever = make_rag_retriever(vectorstore)  ← 启动时执行，user_id 未知
-      现在：检索器在 search_notes 被调用时才按 user_id 动态构建，结果由 _retriever_cache 缓存
-    - search_notes 删除后置过滤逻辑（user_id / is_deleted 过滤已前置到检索器内部）
-
-保留的工具（3个）：
-    1. search_notes   向量库语义检索
-    2. get_note       MySQL 按 ID 精确读取完整笔记
-    3. get_note_stats MySQL 聚合统计
+LangGraph 工具集（3 个）：
+  1. search_notes    — 向量语义检索
+  2. get_note        — 按 ID 精确读取完整笔记（MongoDB）
+  3. get_all_titles  — 全量标题列表（MongoDB）
+  4. get_note_stats  — 聚合统计（MongoDB）
 """
 
 import asyncio
 import json
-import os
+from datetime import datetime, timedelta
 
-from dotenv import load_dotenv
 from langchain.tools import tool
 from langchain_core.runnables import RunnableConfig
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.rag import make_rag_retriever, rerank_docs
 
-load_dotenv()
-
-_ASYNC_ENGINE = create_async_engine(
-    os.getenv(
-        "MYSQL_ASYNC_URL",
-        "mysql+aiomysql://root:123456@localhost/black_note",
-    ),
-    pool_size=5,
-    max_overflow=10,
-)
-
 
 def make_tools(vectorstore):
-    """
-    工具工厂函数，启动时调用一次。
 
-    注意：不在这里构建检索器。
-    检索器依赖 user_id，启动时 user_id 未知，
-    必须等请求进来才能按用户构建。
-    vectorstore 引用传进来供工具函数闭包使用。
-    """
-
-    # ── 工具 1：向量语义检索 ───────────────────────────────────────────────
+    # ── 工具 1：向量语义检索 ────────────────────────────────────────
     @tool
     async def search_notes(
         query: str,
@@ -58,28 +31,18 @@ def make_tools(vectorstore):
         用自然语言语义检索用户的笔记。
 
         参数：
-        - query: 用户的模糊描述或关键词，例如"那篇关于焦虑的文章""我写过很开心的那天"
-        - limit: 返回条数（默认 8，可按需调大用于跨笔记分析场景）
+        - query: 用户的模糊描述或关键词
+        - limit: 返回条数（默认 8）
 
-        返回：JSON，包含 notes 数组（note_id、title、created_at、snippet、images）和 total。
+        返回：JSON，包含 notes 数组（note_id、title、created_at、snippet）和 total。
         """
         user_id = config.get("configurable", {}).get("user_id")
         try:
-            # 请求时才构建检索器，此时 user_id 已知
-            # make_rag_retriever 内部有 _retriever_cache，同一用户只构建一次
-            # 过滤（user_id + is_deleted）已前置到检索器内部，不需要后置过滤
             retriever = make_rag_retriever(vectorstore, user_id=user_id)
+            raw_docs  = await asyncio.to_thread(retriever.invoke, query)
+            reranked  = await asyncio.to_thread(rerank_docs, query, raw_docs, top_n=limit)
 
-            # 同步检索放入线程池，避免阻塞 event loop
-            raw_docs = await asyncio.to_thread(retriever.invoke, query)
-
-            # rerank 是 CPU 密集型同步操作，同样放入线程池
-            reranked = await asyncio.to_thread(
-                rerank_docs, query, raw_docs, top_n=limit
-            )
-
-            seen = set()
-            notes = []
+            seen, notes = set(), []
             for doc in reranked:
                 note_id = doc.metadata.get("note_id")
                 if note_id and note_id not in seen:
@@ -89,145 +52,124 @@ def make_tools(vectorstore):
                         "note_id":    note_id,
                         "title":      meta.get("title", "无标题"),
                         "created_at": str(meta.get("created_at", "")),
-                        "snippet": (
-                            doc.page_content[:400] + "..."
-                            if len(doc.page_content) > 400
-                            else doc.page_content
-                        ),
-                        "images": meta.get("images"),
+                        "snippet":    doc.page_content[:400] + "..." if len(doc.page_content) > 400 else doc.page_content,
                     })
-
             return json.dumps({"notes": notes, "total": len(notes)}, ensure_ascii=False)
-
         except Exception as e:
             return json.dumps({"error": f"语义检索失败：{str(e)}"}, ensure_ascii=False)
 
-    # ── 工具 2：按 ID 读取完整笔记 ────────────────────────────────────────
+    # ── 工具 2：按 ID 读取完整笔记 ─────────────────────────────────
     @tool
     async def get_note(
         note_id: str,
         config: RunnableConfig = None,
     ) -> str:
         """
-        按笔记 ID 从数据库读取完整内容。
+        按笔记 ID 从 MongoDB 读取完整内容。
 
         参数：
         - note_id: 笔记唯一 ID（通常来自 search_notes 的返回结果）
 
-        返回：JSON，包含 note_id、title、content（完整正文）、created_at、images。
+        返回：JSON，包含 note_id、title、content、created_at、images。
         """
         user_id = config.get("configurable", {}).get("user_id")
         try:
-            async with _ASYNC_ENGINE.connect() as conn:
-                result = await conn.execute(
-                    text("""
-                        SELECT title, content, created_at, images
-                        FROM note
-                        WHERE id = :id AND user_id = :uid AND is_deleted = 0
-                    """),
-                    {"id": note_id, "uid": user_id},
-                )
-                row = result.fetchone()
+            from bson import ObjectId
+            from app.database import get_motor_client
+            from app.config import settings
 
-            if not row:
-                return json.dumps(
-                    {"error": f"笔记 {note_id} 不存在或无权访问"},
-                    ensure_ascii=False,
-                )
+            db   = get_motor_client()[settings.MONGODB_DB]
+            note = await db.notes.find_one({
+                "_id":        ObjectId(note_id),
+                "user_id":    ObjectId(user_id),
+                "is_deleted": False,
+            })
+            if not note:
+                return json.dumps({"error": f"笔记 {note_id} 不存在或无权访问"}, ensure_ascii=False)
 
-            return json.dumps(
-                {
-                    "note_id":    note_id,
-                    "title":      row[0],
-                    "content":    row[1],
-                    "created_at": str(row[2]),
-                    "images":     row[3],
-                },
-                ensure_ascii=False,
-            )
-
+            return json.dumps({
+                "note_id":    note_id,
+                "title":      note.get("title"),
+                "content":    note.get("content"),
+                "created_at": str(note.get("created_at", "")),
+                "images":     note.get("images", []),
+            }, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"error": f"读取失败：{str(e)}"}, ensure_ascii=False)
 
-    # ── 工具 4：获取全量标题列表 ──────────────────────────────────────────
+    # ── 工具 3：全量标题列表 ─────────────────────────────────────────
     @tool
     async def get_all_titles(config: RunnableConfig = None) -> str:
         """
-        获取用户所有笔记的标题列表、创建时间、获赞数量（不含正文），按创建时间倒序排列。
-        无参数。
+        获取用户所有笔记的标题列表、创建时间、获赞数，按创建时间倒序排列。
 
         返回：JSON，包含 notes 数组（note_id、title、created_at、like_count）和 total。
         """
         user_id = config.get("configurable", {}).get("user_id")
         try:
-            async with _ASYNC_ENGINE.connect() as conn:
-                rows = (await conn.execute(
-                    text("""
-                        SELECT id, title, created_at, like_count
-                        FROM note
-                        WHERE user_id = :uid AND is_deleted = 0
-                        ORDER BY created_at DESC
-                    """),
-                    {"uid": user_id},
-                )).fetchall()
- 
+            from bson import ObjectId
+            from app.database import get_motor_client
+            from app.config import settings
+
+            db    = get_motor_client()[settings.MONGODB_DB]
+            cursor = db.notes.find(
+                {"user_id": ObjectId(user_id), "is_deleted": False},
+                {"title": 1, "created_at": 1, "like_count": 1},
+                sort=[("created_at", -1)],
+            )
+            rows = await cursor.to_list(None)
             notes = [
                 {
-                    "note_id":    row[0],
-                    "title":      row[1],
-                    "created_at": str(row[2]),
-                    "like_count": row[3],
+                    "note_id":    str(r["_id"]),
+                    "title":      r.get("title"),
+                    "created_at": str(r.get("created_at", "")),
+                    "like_count": r.get("like_count", 0),
                 }
-                for row in rows
+                for r in rows
             ]
- 
             return json.dumps({"notes": notes, "total": len(notes)}, ensure_ascii=False)
- 
         except Exception as e:
             return json.dumps({"error": f"获取标题失败：{str(e)}"}, ensure_ascii=False)
 
-
+    # ── 工具 4：聚合统计 ─────────────────────────────────────────────
     @tool
     async def get_note_stats(config: RunnableConfig = None) -> str:
         """
-        获取用户笔记的聚合统计数据。
+        获取用户笔记的聚合统计数据（总数、最近一篇创建时间、近 30 天数量）。
 
-        无参数。
-
-        返回：JSON，包含：
-        - total: 笔记总数
-        - latest: 最近一篇的创建时间
-        - this_month: 近 30 天内的笔记数
+        返回：JSON，包含 total、latest、this_month。
         """
         user_id = config.get("configurable", {}).get("user_id")
         try:
-            async with _ASYNC_ENGINE.connect() as conn:
-                row = (await conn.execute(
-                    text("""
-                        SELECT
-                            COUNT(*)                                                  AS total,
-                            MAX(created_at)                                           AS latest,
-                            SUM(created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AS this_month
-                        FROM note
-                        WHERE user_id=:uid AND is_deleted=0
-                    """),
-                    {"uid": user_id},
-                )).fetchone()
+            from bson import ObjectId
+            from app.database import get_motor_client
+            from app.config import settings
 
-            return json.dumps(
-                {
-                    "total":      row[0],
-                    "latest":     str(row[1]) if row[1] else None,
-                    "this_month": row[2],
-                },
-                ensure_ascii=False,
-            )
+            db      = get_motor_client()[settings.MONGODB_DB]
+            now     = datetime.utcnow()
+            month_ago = now - timedelta(days=30)
 
+            pipeline = [
+                {"$match": {"user_id": ObjectId(user_id), "is_deleted": False}},
+                {"$group": {
+                    "_id":        None,
+                    "total":      {"$sum": 1},
+                    "latest":     {"$max": "$created_at"},
+                    "this_month": {"$sum": {"$cond": [{"$gte": ["$created_at", month_ago]}, 1, 0]}},
+                }},
+            ]
+            result = await db.notes.aggregate(pipeline).to_list(1)
+            if not result:
+                return json.dumps({"total": 0, "latest": None, "this_month": 0}, ensure_ascii=False)
+            row = result[0]
+            return json.dumps({
+                "total":      row["total"],
+                "latest":     str(row["latest"]) if row["latest"] else None,
+                "this_month": row["this_month"],
+            }, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"error": f"统计失败：{str(e)}"}, ensure_ascii=False)
 
-    # ── 导出 ──────────────────────────────────────────────────────────────
     tools = [search_notes, get_note, get_all_titles, get_note_stats]
     tools_by_name = {t.name: t for t in tools}
-
     return tools, tools_by_name
