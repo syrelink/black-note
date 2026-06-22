@@ -18,16 +18,10 @@ black-note-app/.stylelintcache
 # black-note-app/src/api/generated/
 
 # ==========================================
-# 后端项目 (black-note-server)
+# 后端项目 (black-note-server) — 已从 git 移除，整体忽略
 # ==========================================
-# 编译产物
-black-note-server/target/
-black-note-server/out/
-black-note-server/bin/
+black-note-server/
 *.class
-
-# 运行时日志
-black-note-server/logs/
 *.log
 
 # ==========================================
