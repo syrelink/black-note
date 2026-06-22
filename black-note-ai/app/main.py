@@ -14,7 +14,7 @@ from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
+from langgraph.checkpoint.mongodb import MongoDBSaver
 
 from app.auth import get_request_user_id
 from app.common import BusinessException, Result
@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     # 确保 Qdrant 集合存在
     get_sync_qdrant_client()
 
-    async with AsyncMongoDBSaver.from_conn_string(
+    with MongoDBSaver.from_conn_string(
         settings.MONGODB_URL, db_name=settings.MONGODB_DB
     ) as checkpointer:
         app.state.graph = build_graph(get_vectorstore(), checkpointer)
