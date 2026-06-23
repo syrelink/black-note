@@ -30,6 +30,7 @@ celery_app.conf.update(
     # 消费后再 ACK：worker 崩溃时任务自动重新入队，不丢失
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    broker_connection_retry_on_startup=True,
     # 时区
     timezone="Asia/Shanghai",
     enable_utc=True,

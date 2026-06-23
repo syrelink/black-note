@@ -317,3 +317,6 @@ open http://localhost:8001/docs
 | RabbitMQ | 异步消息队列 | Celery + Redis 替代（仅向量同步需要异步）|
 | Redisson | 分布式锁 | 点赞幂等改为 MongoDB 唯一索引保证 |
 | hutool | 工具库 | Python 标准库 + passlib |
+
+## <u>**如何把一个复杂任务，拆解并路由给最合适的处理单元？**</u>
+

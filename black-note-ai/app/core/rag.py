@@ -1,93 +1,42 @@
 """
 app/core/rag.py
 
-RAG 混合检索（Qdrant 向量 + BM25），结果缓存在模块变量里。
+RAG 混合检索：Qdrant native hybrid（dense + sparse）+ FlashRank 重排序。
+BM25 稀疏向量在写入时由 fastembed 计算并存入 Qdrant，
+检索时通过 RetrievalMode.HYBRID 一次查询同时走 dense + sparse，
+用 user_id payload filter 隔离用户数据。
 """
 
 from typing import List
 
-import jieba
-from langchain_community.retrievers import BM25Retriever
-from langchain_classic.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from flashrank import Ranker, RerankRequest
 
-from app.config import settings
-
-_retriever_cache: dict = {}   # key = "qdrant:{user_id}"
-
 
 def make_rag_retriever(vectorstore: QdrantVectorStore, user_id: str = None):
     """
-    构建混合检索器，结果缓存在模块变量里。
-    同一用户只建一次，后续复用；笔记更新后 sync.py 会清空缓存。
+    构建 per-user 混合检索器。
+    vectorstore 已在 sync.py 中配置为 RetrievalMode.HYBRID，
+    这里只需附加 user_id 过滤条件即可，无需在内存中建 BM25 索引。
     """
-    cache_key = f"qdrant:{user_id}"
-    if cache_key in _retriever_cache:
-        return _retriever_cache[cache_key]
-
     user_filter = Filter(
         must=[FieldCondition(key="user_id", match=MatchValue(value=str(user_id)))]
     )
-
-    # Qdrant vector retriever with per-user filter
-    vector_retriever = vectorstore.as_retriever(
+    return vectorstore.as_retriever(
         search_type="similarity",
         search_kwargs={"k": 20, "filter": user_filter},
     )
 
-    # Scroll all user docs from Qdrant for BM25
-    qdrant_client = vectorstore.client
-    all_points = []
-    offset = None
-    while True:
-        points, next_offset = qdrant_client.scroll(
-            collection_name=settings.QDRANT_COLLECTION,
-            scroll_filter=user_filter,
-            with_payload=True,
-            limit=1000,
-            offset=offset,
-        )
-        all_points.extend(points)
-        if next_offset is None:
-            break
-        offset = next_offset
-
-    documents = [
-        Document(
-            page_content=p.payload.get("page_content", ""),
-            metadata={k: v for k, v in p.payload.items() if k != "page_content"},
-        )
-        for p in all_points
-    ]
-
-    def chinese_preprocess(text: str):
-        return list(jieba.cut(text))
-
-    bm25_retriever = BM25Retriever.from_documents(
-        documents, k=20, preprocess_func=chinese_preprocess
-    )
-
-    retriever = EnsembleRetriever(
-        retrievers=[bm25_retriever, vector_retriever],
-        weights=[0.48, 0.52],
-        c=60,
-    )
-
-    _retriever_cache[cache_key] = retriever
-    print(f"BM25 检索器已构建并缓存（{len(documents)} 个文档，user={user_id}）")
-    return retriever
-
 
 def rerank_docs(query: str, docs: List[Document], top_n: int = 6) -> List[Document]:
-    """FlashRank 重排序。"""
+    """FlashRank 重排序（CPU 密集，由调用方用 asyncio.to_thread 包裹）。"""
     if not docs:
         return []
 
-    passages  = [doc.page_content.strip() for doc in docs if len(doc.page_content.strip()) >= 10]
     valid_docs = [doc for doc in docs if len(doc.page_content.strip()) >= 10]
+    passages   = [doc.page_content.strip() for doc in valid_docs]
 
     if not passages:
         return docs[:top_n]

@@ -69,7 +69,7 @@ async def get_feed(current_user_id: str, last_timestamp: int, page_size: int) ->
         ))
 
     return FeedResponse(
-        list=note_vos,
+        notes=note_vos,
         next_timestamp=next_timestamp,
         has_more=len(tuples) == page_size,
     )

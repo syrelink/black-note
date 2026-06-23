@@ -46,8 +46,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console  →  http://localhost:9001
+      - "9002:9000"   # S3 API
+      - "9003:9001"   # Web Console  →  http://localhost:9003
     volumes:
       - minio_data:/data
     environment:

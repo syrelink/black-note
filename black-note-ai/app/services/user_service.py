@@ -8,7 +8,7 @@ Token 以 UUID 存入 Redis，key 格式与 Java 端完全一致：login:token:{
 import uuid
 from datetime import datetime
 
-from passlib.context import CryptContext
+import bcrypt
 
 from app.common import BusinessException
 from app.config import settings
@@ -16,7 +16,13 @@ from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.user import LoginRequest, LoginResponse, RegisterRequest, UserResponse, UserUpdateRequest
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 async def register(dto: RegisterRequest) -> None:
@@ -25,7 +31,7 @@ async def register(dto: RegisterRequest) -> None:
 
     user = User(
         username=dto.username,
-        password=_pwd_ctx.hash(dto.password),
+        password=_hash_password(dto.password),
         nickname="小黑子",
         avatar=settings.DEFAULT_AVATAR,
     )
@@ -34,7 +40,7 @@ async def register(dto: RegisterRequest) -> None:
 
 async def login(dto: LoginRequest) -> LoginResponse:
     user = await User.find_one(User.username == dto.username)
-    if not user or not _pwd_ctx.verify(dto.password, user.password):
+    if not user or not _verify_password(dto.password, user.password):
         raise BusinessException(400, "用户名或密码错误")
 
     token = uuid.uuid4().hex

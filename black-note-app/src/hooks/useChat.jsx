@@ -61,9 +61,9 @@ export function useChat(userId) {
         if (saved.length > 0) {
           // 把后端返回的时间格式统一成时间戳
           const formatted = saved.map(s => ({
-            id:        s.id,
+            id:        s.session_id,
             title:     s.title,
-            createdAt: new Date(s.createdAt).getTime(),
+            createdAt: new Date(s.created_at).getTime(),
           }))
           setSessions(formatted)
           setActiveId(formatted[0].id)

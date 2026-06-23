@@ -3,6 +3,6 @@ from app.schemas.note import NoteResponse
 
 
 class FeedResponse(BaseModel):
-    list: list[NoteResponse] = []
+    notes: list[NoteResponse] = []
     next_timestamp: int = 0
     has_more: bool = False
