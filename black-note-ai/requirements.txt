@@ -9,8 +9,9 @@ motor                     # async MongoDB driver
 beanie==1.26.0            # ODM for Motor (Pydantic Document); 2.x breaks with motor 3.7
 
 # ── 向量库（Qdrant）──────────────────────────────────────────────
-qdrant-client             # Qdrant Python client (sync + async)
-langchain-qdrant          # LangChain QdrantVectorStore
+qdrant-client==1.18.0     # Qdrant Python client；需与 server 版本对齐（差距 ≤ 1）
+langchain-qdrant==1.1.0   # LangChain QdrantVectorStore
+fastembed==0.8.0          # sparse 向量（Qdrant/bm25）；供 FastEmbedSparse 使用
 
 # ── 缓存 ──────────────────────────────────────────────────────────
 redis[asyncio]            # redis-py async 支持
@@ -27,7 +28,6 @@ langchain-openai
 langchain-community
 langchain-classic
 sentence-transformers
-fastembed                 # sparse 向量（Qdrant/bm25），供 FastEmbedSparse 使用
 flashrank                  # 轻量级 reranker
 langgraph
 langgraph-checkpoint-mongodb  # MongoDB checkpointer for LangGraph

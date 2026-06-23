@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.pyc
+.DS_Store
+models/        # 本地模型文件（fastembed BM25 等），手动放置，不提交

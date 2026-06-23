@@ -10,8 +10,12 @@
 """
 
 import asyncio
+import os
 import uuid
+from pathlib import Path
 from uuid import UUID
+
+_BM25_LOCAL_PATH = Path(__file__).parent.parent.parent / "models" / "bm25"
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -135,6 +139,19 @@ if __name__ == "__main__":
     chunks = notes_to_documents(notes)
     print(f"Step 2+3 完成 → 有效 chunk：{len(chunks)} 个")
 
-    dense_emb  = BGEEmbeddings()
-    sparse_emb = FastEmbedSparse(model_name="Qdrant/bm25")
+    dense_emb = BGEEmbeddings()
+
+    if _BM25_LOCAL_PATH.exists():
+        sparse_emb = FastEmbedSparse(
+            model_name="Qdrant/bm25",
+            additional_kwargs={"specific_model_path": str(_BM25_LOCAL_PATH)},
+        )
+    else:
+        _orig = os.environ.pop("HF_HUB_OFFLINE", None)
+        try:
+            sparse_emb = FastEmbedSparse(model_name="Qdrant/bm25")
+        finally:
+            if _orig is not None:
+                os.environ["HF_HUB_OFFLINE"] = _orig
+
     store_to_qdrant(chunks, dense_emb, sparse_emb)

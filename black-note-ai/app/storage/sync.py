@@ -10,9 +10,14 @@ app/storage/sync.py
   - AsyncQdrantClient（供 Celery worker 写入 Qdrant）
 """
 
+import os
 import uuid
 import logging
+from pathlib import Path
 from uuid import UUID
+
+# 本地 BM25 模型路径（下载后放在此处可离线使用）
+_BM25_LOCAL_PATH = Path(__file__).parent.parent.parent / "models" / "bm25"
 
 from qdrant_client import AsyncQdrantClient, QdrantClient
 from qdrant_client.models import (
@@ -52,7 +57,20 @@ def get_embeddings() -> BGEEmbeddings:
 def get_sparse_embeddings() -> FastEmbedSparse:
     global _sparse_embeddings
     if _sparse_embeddings is None:
-        _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+        if _BM25_LOCAL_PATH.exists():
+            # 优先读本地文件（离线），通过 specific_model_path 跳过所有网络下载
+            _sparse_embeddings = FastEmbedSparse(
+                model_name="Qdrant/bm25",
+                additional_kwargs={"specific_model_path": str(_BM25_LOCAL_PATH)},
+            )
+        else:
+            # 本地文件不存在，临时解除 HF_HUB_OFFLINE 允许下载
+            _orig = os.environ.pop("HF_HUB_OFFLINE", None)
+            try:
+                _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+            finally:
+                if _orig is not None:
+                    os.environ["HF_HUB_OFFLINE"] = _orig
     return _sparse_embeddings
 
 
