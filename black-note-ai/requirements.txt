@@ -1,37 +1,14 @@
-# ── Web 框架 ──────────────────────────────────────────────────────
 fastapi
 uvicorn[standard]
-python-multipart          # 文件上传 (UploadFile)
 python-dotenv
-
-# ── 数据库（MongoDB）─────────────────────────────────────────────
-motor                     # async MongoDB driver
-beanie==1.26.0            # ODM for Motor (Pydantic Document); 2.x breaks with motor 3.7
-
-# ── 向量库（Qdrant）──────────────────────────────────────────────
-qdrant-client==1.18.0     # Qdrant Python client；需与 server 版本对齐（差距 ≤ 1）
-langchain-qdrant==1.1.0   # LangChain QdrantVectorStore
-fastembed==0.8.0          # sparse 向量（Qdrant/bm25）；供 FastEmbedSparse 使用
-
-# ── 缓存 ──────────────────────────────────────────────────────────
-redis[asyncio]            # redis-py async 支持
-
-# ── 认证 / 密码 ────────────────────────────────────────────────────
-bcrypt                    # BCrypt 密码哈希（直接使用，不经 passlib）
-
-# ── 文件存储 ──────────────────────────────────────────────────────
-minio                     # MinIO Python SDK
-
-# ── AI / RAG ──────────────────────────────────────────────────────
+httpx
+pydantic
+PyYAML>=6.0
 langchain
 langchain-openai
-langchain-community
-langchain-classic
-sentence-transformers
-flashrank                  # 轻量级 reranker
 langgraph
-langgraph-checkpoint-mongodb  # MongoDB checkpointer for LangGraph
-
-# ── 异步任务队列 ──────────────────────────────────────────────────
-celery[redis]             # Celery + Redis broker/backend
-flower                    # Celery 可视化监控（可选）
+langgraph-checkpoint-postgres>=3.1.0
+psycopg[binary,pool]>=3.2
+pytest
+pytest-asyncio
+pypdf>=5.0
