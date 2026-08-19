@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
+from urllib.parse import quote
 from uuid import uuid4
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from app.game_agent.attachments import decode_data_url
+from app.attachment_store import AttachmentObjectStore
 
 
 class SessionStore:
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        attachment_store: AttachmentObjectStore | None = None,
+    ):
         self.database_url = database_url
+        self.attachment_store = attachment_store
         self.pool = AsyncConnectionPool(
             conninfo=database_url,
             min_size=1,
@@ -61,13 +69,27 @@ class SessionStore:
                         name TEXT NOT NULL,
                         mime_type TEXT NOT NULL,
                         size INTEGER NOT NULL,
-                        content BYTEA NOT NULL,
+                        object_key TEXT NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL
                     )
                     """
                 )
                 await cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_chat_attachments_session ON chat_attachments(session_id, created_at)"
+                )
+                await cursor.execute(
+                    "ALTER TABLE chat_attachments ADD COLUMN IF NOT EXISTS object_key TEXT"
+                )
+                # 旧版附件只存在 PostgreSQL BYTEA 中，无法在删除 content 后继续读取。
+                # 按当前存储协议移除这些遗留记录，只保留已经落入 MinIO 的附件。
+                await cursor.execute(
+                    "DELETE FROM chat_attachments WHERE object_key IS NULL"
+                )
+                await cursor.execute(
+                    "ALTER TABLE chat_attachments DROP COLUMN IF EXISTS content"
+                )
+                await cursor.execute(
+                    "ALTER TABLE chat_attachments ALTER COLUMN object_key SET NOT NULL"
                 )
                 await cursor.execute(
                     """
@@ -160,55 +182,78 @@ class SessionStore:
         """请求一到达就保存用户消息和图片，保证刷新或模型失败后仍可恢复。"""
         now = datetime.now().astimezone()
         stored_attachments = []
-        for attachment in attachments or []:
-            item = attachment.model_dump() if hasattr(attachment, "model_dump") else dict(attachment)
-            raw = decode_data_url(item["data_url"], item["size"])
-            attachment_id = str(uuid4())
-            stored_attachments.append({
-                "attachment_id": attachment_id,
-                "name": item["name"],
-                "mime_type": item["mime_type"],
-                "size": item["size"],
-                "data_url": f"/ai/attachments/{attachment_id}",
-                "content": raw,
-            })
+        uploaded_object_keys: list[str] = []
+        session_key = hashlib.sha256(session_id.encode()).hexdigest()[:24]
+        if attachments and self.attachment_store is None:
+            raise RuntimeError("附件存储未配置，图片必须保存到 MinIO")
+        try:
+            for attachment in attachments or []:
+                item = attachment.model_dump() if hasattr(attachment, "model_dump") else dict(attachment)
+                raw = decode_data_url(item["data_url"], item["size"], item["mime_type"])
+                attachment_id = str(uuid4())
+                object_key = f"sessions/{session_key}/{attachment_id}"
+                await self.attachment_store.put(object_key, raw, item["mime_type"])
+                uploaded_object_keys.append(object_key)
+                stored_attachments.append({
+                    "attachment_id": attachment_id,
+                    "name": item["name"],
+                    "mime_type": item["mime_type"],
+                    "size": item["size"],
+                    "data_url": (
+                        f"/ai/sessions/{quote(session_id, safe='')}/attachments/{attachment_id}"
+                    ),
+                    "object_key": object_key,
+                })
+        except Exception:
+            if self.attachment_store is not None and uploaded_object_keys:
+                await self.attachment_store.delete_many(uploaded_object_keys)
+            raise
         transcript_attachments = [
-            {key: value for key, value in item.items() if key != "content"}
+            {
+                key: value for key, value in item.items()
+                if key != "object_key"
+            }
             for item in stored_attachments
         ]
-        async with await self._connect() as connection:
-            async with connection.transaction():
-                async with connection.cursor() as cursor:
-                    await cursor.execute(
-                        """
-                        INSERT INTO chat_sessions(session_id, title, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT(session_id) DO UPDATE SET updated_at = EXCLUDED.updated_at
-                        """,
-                        (session_id, self._title(question), now, now),
-                    )
-                    if stored_attachments:
-                        await cursor.executemany(
+        try:
+            async with await self._connect() as connection:
+                async with connection.transaction():
+                    async with connection.cursor() as cursor:
+                        await cursor.execute(
                             """
-                            INSERT INTO chat_attachments(
-                                attachment_id, session_id, name, mime_type, size, content, created_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO chat_sessions(session_id, title, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT(session_id) DO UPDATE SET updated_at = EXCLUDED.updated_at
                             """,
-                            [
-                                (
-                                    item["attachment_id"], session_id, item["name"], item["mime_type"],
-                                    item["size"], item["content"], now,
-                                )
-                                for item in stored_attachments
-                            ],
+                            (session_id, self._title(question), now, now),
                         )
-                    await cursor.execute(
-                        """
-                        INSERT INTO chat_transcript(session_id, role, content, created_at, attachments)
-                        VALUES (%s, 'user', %s, %s, %s::jsonb)
-                        """,
-                        (session_id, question, now, json.dumps(transcript_attachments, ensure_ascii=False)),
-                    )
+                        if stored_attachments:
+                            await cursor.executemany(
+                                """
+                                INSERT INTO chat_attachments(
+                                    attachment_id, session_id, name, mime_type, size,
+                                    object_key, created_at
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                """,
+                                [
+                                    (
+                                        item["attachment_id"], session_id, item["name"], item["mime_type"],
+                                        item["size"], item["object_key"], now,
+                                    )
+                                    for item in stored_attachments
+                                ],
+                            )
+                        await cursor.execute(
+                            """
+                            INSERT INTO chat_transcript(session_id, role, content, created_at, attachments)
+                            VALUES (%s, 'user', %s, %s, %s::jsonb)
+                            """,
+                            (session_id, question, now, json.dumps(transcript_attachments, ensure_ascii=False)),
+                        )
+        except Exception:
+            if self.attachment_store is not None and uploaded_object_keys:
+                await self.attachment_store.delete_many(uploaded_object_keys)
+            raise
         return transcript_attachments
 
     async def record_assistant_message(self, session_id: str, answer: str) -> None:
@@ -227,15 +272,26 @@ class SessionStore:
                     (now, session_id),
                 )
 
-    async def get_attachment(self, attachment_id: str) -> dict | None:
+    async def get_attachment(self, attachment_id: str, session_id: str) -> dict | None:
+        """按附件与会话双重条件读取，避免跨会话引用图片。"""
         async with await self._connect() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    "SELECT name, mime_type, content FROM chat_attachments WHERE attachment_id = %s",
-                    (attachment_id,),
+                    """
+                    SELECT name, mime_type, size, object_key
+                    FROM chat_attachments
+                    WHERE attachment_id = %s AND session_id = %s
+                    """,
+                    (attachment_id, session_id),
                 )
                 row = await cursor.fetchone()
-                return dict(row) if row else None
+                if not row:
+                    return None
+                result = dict(row)
+                if self.attachment_store is None:
+                    raise RuntimeError("附件存储未配置，无法读取 MinIO 对象")
+                result["content"] = await self.attachment_store.get(result["object_key"])
+                return result
 
     async def list_sessions(self) -> list[dict]:
         async with await self._connect() as connection:
@@ -273,13 +329,22 @@ class SessionStore:
                 return await cursor.fetchone() is not None
 
     async def delete_session(self, session_id: str) -> bool:
+        object_keys: list[str] = []
         async with await self._connect() as connection:
             async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT object_key FROM chat_attachments WHERE session_id = %s AND object_key IS NOT NULL",
+                    (session_id,),
+                )
+                object_keys = [row["object_key"] for row in await cursor.fetchall()]
                 await cursor.execute(
                     "DELETE FROM chat_sessions WHERE session_id = %s RETURNING session_id",
                     (session_id,),
                 )
-                return await cursor.fetchone() is not None
+                deleted = await cursor.fetchone() is not None
+        if deleted and self.attachment_store is not None and object_keys:
+            await self.attachment_store.delete_many(object_keys)
+        return deleted
 
     async def record_run(
         self,

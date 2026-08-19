@@ -6,53 +6,53 @@ GameRover 当前定位为一个面向中文玩家的游戏资讯与玩法助手�
 
 ```text
 用户输入
-  → prepare_turn
-  → compact_context
-  → agent
+  → TurnContext
+  → ContextCompaction（测压；多数时候 no-op）
+  → Agent
       ├─ 直接回答 → END
-      ├─ load_skill → execute_tools → 临时注入 Skill → agent
-      ├─ Tool Calling → execute_tools → agent
-      └─ 达到工具轮次上限 → force_finish → END
+      └─ Tool Calling → ToolExecution → ContextCompaction → Agent
 ```
 
 核心文件：
 
 - `graph.py`：Agent Loop、Tool Runtime、停止条件。
 - `memory.py`：上下文预算、安全切分和滚动摘要。
-- `models.py`：Harness State、Running Summary、Visual Memory、Token Ledger、Tool Trace。
+- `models.py`：Harness State、ContextSummary、Token Ledger、Tool Trace。
 - `tools.py`：游戏资料/Wiki/攻略与实时资讯搜索。
 - `skills/`：Agent Skills 元数据、工作流、references 与安全加载器。
-- `image_memory.py`：历史图片到 Running Summary 视觉记忆的转换。
-- `attachments.py`：预留的文档校验与文本提取能力。
+- `attachments.py`：附件引用协议、图片临时 Hydration 与文档文本提取能力。
 
-## 五层模型上下文
+`TurnContext` 是每个用户 Turn 的初始化节点。LangGraph Checkpointer 会跨轮保留会话状态，因此这里会清空上一轮的 `tool_trace`、`skill_trace`、Token Usage 和工具轮次计数，递增 `turn_count`，并把新到达的 HumanMessage 同步进 Token 估算缓存。它不负责生成摘要，也不负责选择模型上下文。
+
+## 模型上下文
 
 每次调用模型前，Harness 动态组装：
 
 ```text
 System Prompt
-+ Running Summary
-+ Active Skill Instructions（本轮按需）
++ ContextSummary
 + Recent Messages
-+ Current Turn / Tool Results
++ Current Turn / Tool Results（包括按需加载的 Skill 正文）
 ```
 
 PostgreSQL Checkpoint 保存线程状态，但模型不会直接看到所有历史 Checkpoint。模型可见内容由 `ContextManager` 按预算选择。聊天页面在 PostgreSQL 中另存一份不可变 Transcript，因此模型上下文被自动压缩后，用户仍能在左侧历史会话中查看完整聊天记录。
 
-## 当前轮多模态输入
+## 多模态输入与压缩
 
-点击输入框左侧加号后，浏览器读取本地图片并编码成 Data URL，和文字一起作为当前 `HumanMessage` 发送。主模型在同一次调用中直接看到文字和原图；只有旧轮次被压缩时，原图才转换为 `RunningSummary.visual_memories` 中的结构化视觉记忆。
+点击输入框左侧加号后，浏览器以 Data URL 上传图片。服务端立即解码并写入 MinIO，PostgreSQL 只保存 `attachment_id`、会话归属、MIME、大小和 `object_key`，LangGraph State 也只保存引用。`Agent` 节点调用模型前才根据 `object_key` 从 MinIO 读取当前 Turn 的图片，临时组装多模态 `model_context`；这个含 Base64 的临时副本不会写回 State。
 
 ```text
 选择本地文件
 → 浏览器预览并编码 Data URL
 → ChatRequest 校验（最多 5 个、单个 10MB、合计 20MB）
-→ 文字块 + 图片块进入同一 HumanMessage
+→ 图片 bytes 写入 MinIO，PostgreSQL 写入 attachment_id + object_key
+→ HumanMessage 只写 attachment://{id}
+→ Agent 调用前按 id 临时 Hydrate 原图
 → 主模型联合理解文字与图片
-→ 旧轮次过期时才生成图片结构化摘要
+→ 回答和有界图片分析记录写回 State，原图不写回
 ```
 
-当前阶段只接收图片附件。PostgreSQL Transcript 保存图片内容以恢复聊天展示；LangGraph Checkpoint 保存当前多模态消息。较早轮次进入 Running Summary 时只保留结构化图片语义，避免原图永久占用模型上下文。
+当前阶段只接收图片附件。MinIO bucket 保存原图，PostgreSQL `chat_attachments` 只保存元数据与 `object_key`，Transcript 保存带会话归属的附件 URL，LangGraph Checkpoint 只保存 `AttachmentRef`。下一轮默认不重新 Hydrate 旧图；删除会话时同步删除其 MinIO 对象。启动迁移会删除没有 MinIO `object_key` 的旧附件记录，并移除旧版 `content BYTEA` 列，系统不再提供数据库二进制回退路径。
 
 ## 滚动摘要
 
@@ -67,16 +67,17 @@ GAME_COMPACTION_RETRIES=1
 GAME_TOOL_PRUNE_THRESHOLD_TOKENS=1800
 GAME_TOOL_PRUNE_RETAIN_TOKENS=600
 GAME_TOOL_RESULT_BUDGET_TOKENS=2500
-GAME_MAX_TOOL_ROUNDS=3
 ```
 
-Harness 采用与 DeepSeek Harness 相同的默认比例：在有效窗口达到 80% 时触发压缩，并逐字保留窗口 16% 的近期表层。64K 有效窗口对应约 51.2K 的触发线和约 10.2K 的近期原文预算。Token Ledger 增量记录每条消息的估算值，并加入 System Prompt、Tool Schema 等协议开销；API 返回 `usage.input_tokens` 后会平滑校准协议开销，但本地计数仍是压缩前的安全估算，不冒充供应商精确计费。
+默认在有效窗口达到 80% 时触发压缩，并逐字保留窗口 16% 的近期消息。Token Ledger 在这里仅是当前 LangGraph State 的增量估算缓存，不是事件源，也不通过 Replay 重建上下文。真正运行时上下文始终由 `state.messages + ContextSummary` 组装。
+
+事件日志只用于观测与评测：每次模型调用前记录 `context/pressure`，模型结束记录 `estimated_input_tokens` 与供应商返回的 `provider_input_tokens`。两者可以计算估算误差、验证压缩触发时机，但日志不会反过来驱动 Agent。这个取舍让小型 Harness 保持单一事实源，也避免实现一套不必要的 Event Sourcing 系统。
 
 每次模型请求前都会检查压力。触发压缩后先裁剪较早的大型 Tool Result；重新测量后仍超过触发线，才执行结构化摘要：
 
 ```text
-New Running Summary
-= Compress(Old Running Summary + Newly Expired Complete Turns)
+New ContextSummary
+= Compress(Old ContextSummary + Newly Expired Complete Turns)
 ```
 
 摘要不会 append。每次都生成一份新的当前有效状态，并受固定 Summary Budget 限制。
@@ -101,14 +102,17 @@ agent_run_events
 
 ## Tool Runtime
 
-模型可见工具保持为两个：
+模型可见工具保持为三个：
 
-- `load_skill(name, resource)`：激活专业工作流或按需 reference，只返回加载确认；正文由 Harness 临时注入，不写入持久消息。
+- `skill(name)`：返回完整 `SKILL.md`，作为 ToolMessage 供下一次 Agent Step 使用。
+- `read_skill_reference(name, path)`：安全读取 Skill 明确引用且当前任务需要的 `references/*.md`。
 - `web_search(query, depth)`：模型自主决定是否调用，并通过 `quick` 或 `research` 选择快速查询或多来源研究；Query 可以来自文字、图片理解和对话上下文。
 
 ## Agent Skills 与渐进式披露
 
-启动时 Registry 扫描 `skills/*/SKILL.md`，只把 `name + description` 目录加入 System Prompt。模型判断任务需要专业流程时调用 `load_skill`，Harness 将完整 `SKILL.md` 加入本轮后续模型调用；只有 Skill 明确要求且当前任务需要时，模型才继续加载 `references/*.md`。
+进程启动并构建 Agent 时，`SkillRegistry` 的构造函数会调用 `refresh()`，通过 `root.glob("*/SKILL.md")` 自动扫描 Skill，解析 YAML Frontmatter 并校验目录名、`name` 和 `description`。随后 `catalog_prompt()` 只把 `name + description` 目录拼进 System Prompt。完整正文不会常驻；模型判断任务需要专业流程时调用 `skill(name)`，正文才作为 ToolMessage 进入下一步。只有正文明确要求且当前任务需要时，模型才调用 `read_skill_reference`。
+
+扫描不是每次请求执行，也不是文件热更新。服务运行期间新增 Skill 后，需要重启 Agent 或显式调用 `refresh()` 并重新构建 System Prompt。
 
 ```text
 元数据目录（始终加载）
@@ -122,7 +126,7 @@ agent_run_events
 - `game-build-advisor`：基于账号、装备、属性和资源的配队与养成建议。
 - `game-news`：最新公告、版本动态、行业新闻和传闻核验。
 
-`HarnessState.active_skills`、`loaded_skill_resources` 和 `skill_trace` 记录本轮激活情况；`prepare_turn` 在新一轮开始时重置。Skill 正文始终从本地可信目录读取，不进入聊天历史。
+Skill 不是 LangGraph 节点，而是 Registry 提供的模型工具。这样所有 Skill 都复用同一条 `Agent → ToolExecution → Agent` 循环，新增 Skill 只增加文档，不增加节点和边。`ToolExecution` 在一个节点内完成工具执行、ToolMessage 写回、轨迹提取和 Skill 审计；`HarnessState.skill_trace` 只记录本轮加载情况，正文作为标准 ToolMessage 保留。
 
 寒暄、情绪陪伴、创作改写、主观建议，以及当前对话或附件已经足够回答的问题不会触发搜索。简单、明确、单事实问题走快速搜索；配队、机制、攻略、比较和多来源核验走 Agentic Search。
 
@@ -167,6 +171,13 @@ search_message
 
 高频的模型文本分片只通过 SSE 发送，不写入事件表；可恢复的语义事件按顺序写入 PostgreSQL。`SessionStore` 使用连接池复用数据库连接，避免日志写入本身放大响应延迟。`GET /ai/sessions/{session_id}/runs` 可在刷新或切换会话后恢复每轮轨迹，即使运行失败，已经发生的事件也不会丢失。
 
+日志评测关注四组可直接计算的指标：
+
+- 上下文：压力超过阈值时是否触发压缩、压缩后 Token 降幅、是否收敛。
+- Token 估算：`abs(estimated - provider) / provider`，只评估误差，不校正历史消息。
+- Skill：应触发样本的召回率、不应触发样本的误触发率、reference 是否按需加载。
+- 性能与可靠性：TTFT、总耗时、工具超时率、工具成功率和达到轮次上限的比例。
+
 ## 启动
 
 ```bash
@@ -175,7 +186,7 @@ conda activate black
 uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
-打开 `http://127.0.0.1:8001/`。左侧展示持久化历史会话，中间是聊天区，右侧展示 Tool Trace、上下文预算、Running Summary 和自动压缩状态。
+打开 `http://127.0.0.1:8001/`。左侧展示持久化历史会话，中间是聊天区，右侧展示 Tool Trace、上下文预算、ContextSummary 和自动压缩状态。
 
 调试接口：
 

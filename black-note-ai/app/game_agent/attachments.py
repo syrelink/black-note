@@ -1,7 +1,7 @@
 """通用文档入口：校验上传内容并提取有界正文。
 
-图片直接作为 HumanMessage 的一部分交给主模型；PDF、DOCX、文本和代码文件在本地提取正文。
-原始文件不进入长期模型上下文，只保存哈希引用和有界的提取结果。
+图片原文由 AttachmentStore 保存，HumanMessage 只持久化 attachment_id；调用主模型前
+临时还原成多模态块。PDF、DOCX、文本和代码文件在本地提取正文。
 """
 
 from __future__ import annotations
@@ -13,9 +13,12 @@ import json
 import re
 import zipfile
 from datetime import datetime
+from typing import Awaitable, Callable
 from xml.etree import ElementTree
 
-from app.game_agent.models import AttachmentInput
+from langchain_core.messages import AnyMessage, HumanMessage
+
+from app.game_agent.models import AttachmentInput, AttachmentRef
 
 
 MAX_EXTRACTED_CHARS = 24_000
@@ -26,17 +29,66 @@ TEXT_MIME_TYPES = {
     "application/x-yaml",
 }
 
+AttachmentLoader = Callable[[str, str], Awaitable[dict | None]]
+
+
+def render_attachment_references(refs: list[AttachmentRef | dict]) -> str:
+    """生成可持久化的引用文本；不包含图片二进制。"""
+    normalized = [AttachmentRef.model_validate(item) for item in refs]
+    return "\n".join(
+        f"- attachment://{item.attachment_id} name={item.name} "
+        f"mime_type={item.mime_type} size={item.size}"
+        for item in normalized
+    )
+
+
+async def hydrate_current_images(
+    model_context: list[AnyMessage],
+    refs: list[AttachmentRef | dict],
+    *,
+    session_id: str,
+    loader: AttachmentLoader | None,
+) -> list[AnyMessage]:
+    """仅为本次模型请求把当前图片引用还原为多模态块，不修改 State 消息。"""
+    normalized = [AttachmentRef.model_validate(item) for item in refs]
+    if not normalized or loader is None:
+        return list(model_context)
+
+    image_blocks = []
+    for ref in normalized:
+        stored = await loader(ref.attachment_id, session_id)
+        if stored is None:
+            raise ValueError(f"图片附件不存在或不属于当前会话：{ref.attachment_id}")
+        mime_type = str(stored.get("mime_type") or ref.mime_type)
+        if not mime_type.startswith("image/"):
+            raise ValueError(f"附件不是图片：{ref.attachment_id}")
+        raw = bytes(stored["content"])
+        encoded = base64.b64encode(raw).decode("ascii")
+        image_blocks.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
+        })
+
+    hydrated = list(model_context)
+    for index in range(len(hydrated) - 1, -1, -1):
+        message = hydrated[index]
+        if not isinstance(message, HumanMessage):
+            continue
+        content = message.content if isinstance(message.content, list) else [
+            {"type": "text", "text": str(message.content)}
+        ]
+        hydrated[index] = message.model_copy(update={"content": [*content, *image_blocks]})
+        return hydrated
+    raise ValueError("当前模型上下文中没有可挂载图片的用户消息")
+
 
 class AttachmentArtifactService:
     """保留文档正文提取能力；图片不经过这个旁路服务。"""
 
-    def __init__(self, image_service=None):
-        self.image_service = image_service
-
     async def analyze(self, attachment: AttachmentInput | dict) -> dict:
         """验证附件并返回统一 Artifact；不支持的格式也返回可展示的状态。"""
         item = AttachmentInput.model_validate(attachment)
-        raw = decode_data_url(item.data_url, item.size)
+        raw = decode_data_url(item.data_url, item.size, item.mime_type)
         if item.mime_type.startswith("image/"):
             raise ValueError("图片应直接作为多模态 HumanMessage 处理")
 
@@ -68,11 +120,18 @@ class AttachmentArtifactService:
         }
 
 
-def decode_data_url(data_url: str, declared_size: int) -> bytes:
-    """解码前端 Data URL，并校验编码、10MB 上限和声明大小。"""
+def decode_data_url(
+    data_url: str,
+    declared_size: int,
+    declared_mime_type: str | None = None,
+) -> bytes:
+    """解码 Data URL，并校验 MIME、编码、10MB 上限和声明大小。"""
     match = re.fullmatch(r"data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)", data_url, re.DOTALL)
     if not match:
         raise ValueError("附件必须使用 base64 Data URL")
+    encoded_mime_type = str(match.group(1) or "").lower()
+    if declared_mime_type and encoded_mime_type != declared_mime_type.lower():
+        raise ValueError("附件 MIME Type 与 Data URL 不一致")
     try:
         raw = base64.b64decode(match.group(2), validate=True)
     except ValueError as exc:

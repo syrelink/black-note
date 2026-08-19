@@ -244,8 +244,6 @@ class HarnessTracer:
         "ContextCompaction": "检查上下文预算",
         "Agent": "模型判断与生成",
         "ToolExecution": "执行工具",
-        "ProcessToolResults": "处理工具结果",
-        "ForceFinish": "工具轮次上限收敛",
     }
 
     def __init__(self, run_id: str, turn_number: int):
@@ -293,17 +291,13 @@ class HarnessTracer:
                 and message.artifact.get("harness_trace")
             ]
             names = list(dict.fromkeys(trace.get("name", "工具") for trace in traces))
-            event["label"] = "加载专业能力" if names == ["load_skill"] else (
+            event["label"] = "加载专业能力" if names and all(
+                name in {"skill", "read_skill_reference"} for name in names
+            ) else (
                 "执行 " + "、".join(names) if names else "执行工具"
             )
             event["detail"] = f"本批完成 {len(traces)} 个工具调用"
             event["tool_trace"] = traces
-        elif node == "ProcessToolResults":
-            event["detail"] = "已解析工具结果并登记 Skill、轨迹、轮次和 Token 账本"
-        elif node == "ForceFinish":
-            event["detail"] = "工具轮次达到上限，已基于现有证据生成回答"
-            event["tool_trace"] = update.get("tool_trace", [])
-            event["model_metrics"] = dict(self.current_model_metrics)
         else:
             event["detail"] = self.NODE_LABELS.get(node, node)
 

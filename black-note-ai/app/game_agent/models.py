@@ -14,36 +14,19 @@ from pydantic import BaseModel, Field, model_validator
 from typing_extensions import TypedDict
 
 
-class VisualMemory(BaseModel):
-    """历史图片压缩后保留在 RunningSummary 中的任务相关视觉记忆。"""
+class ContextSummary(BaseModel):
+    """较早历史的通用任务存档"""
 
-    source_message_id: str = ""
-    image_type: str = "unknown"
-    game: str = ""
-    entities: list[str] = Field(default_factory=list)
-    scene: str = ""
-    ocr_text: list[str] = Field(default_factory=list)
-    key_facts: list[str] = Field(default_factory=list)
-    uncertainty: str = ""
-    user_relevance: str = ""
-
-
-class RunningSummary(BaseModel):
-    """较早对话压缩后的长期滚动状态，而不是面向用户的自然语言摘要。"""
-
-    # 当前仍在推进的任务必须优先保留，防止压缩后 Agent 丢失目标。
-    active_goal: str = ""
-    # 以下字段按语义分类，方便下一次压缩时去重和淘汰过期信息。
-    resolved_games: list[str] = Field(default_factory=list)
-    resolved_entities: list[str] = Field(default_factory=list)
-    user_preferences: list[str] = Field(default_factory=list)
-    confirmed_facts: list[str] = Field(default_factory=list)
-    current_decisions: list[str] = Field(default_factory=list)
+    primary_request_and_intent: list[str] = Field(default_factory=list)
+    key_concepts: list[str] = Field(default_factory=list)
+    completed_work: list[str] = Field(default_factory=list)
+    errors_and_recoveries: list[str] = Field(default_factory=list)
+    pending_tasks: list[str] = Field(default_factory=list)
+    current_work: list[str] = Field(default_factory=list)
+    next_step: str = ""
+    critical_context: list[str] = Field(default_factory=list)
     important_tool_results: list[str] = Field(default_factory=list)
-    unresolved_questions: list[str] = Field(default_factory=list)
-    visual_memories: list[VisualMemory] = Field(default_factory=list)
-    attachment_refs: list[str] = Field(default_factory=list)
-    narrative: str = ""
+    referenced_artifacts: list[str] = Field(default_factory=list)
 
 
 class TokenLedger(BaseModel):
@@ -115,6 +98,15 @@ class ToolTrace(BaseModel):
     output_items: list[dict] = Field(default_factory=list)
 
 
+class AttachmentRef(BaseModel):
+    """LangGraph State 中保存的轻量图片引用，不包含原始二进制或 Base64。"""
+
+    attachment_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(pattern=r"^image/")
+    size: int = Field(ge=0, le=10 * 1024 * 1024)
+
+
 class HarnessState(TypedDict, total=False):
     """LangGraph Checkpoint 中持久化的完整会话状态。
 
@@ -122,17 +114,18 @@ class HarnessState(TypedDict, total=False):
     messages 使用 add_messages，因此新消息会追加，RemoveMessage 会按 ID 删除。
     """
 
-    # 对话与压缩记忆。
+    # 对话与压缩记忆。running_summary 仅用于读取旧 Checkpoint，新的压缩不再写入。
     messages: Annotated[list[AnyMessage], add_messages]
+    context_summary: dict
     running_summary: dict
-    # 原图只存在于近期 HumanMessage 与数据库附件；历史视觉语义进入 RunningSummary。
+    # HumanMessage 只保存 attachment:// 引用；原图由 AttachmentStore 保存。
+    # current_attachments 只指向当前用户 Turn 的图片。
+    current_attachments: list[dict]
     pending_attachments: list[dict]
     attachment_artifacts: dict[str, dict]
     # Harness 可观测数据和计数器。
     tool_trace: list[dict]
-    # Skill 正文不写入消息历史；这里只保存本轮激活记录和按需 reference 键。
-    active_skills: list[str]
-    loaded_skill_resources: list[str]
+    # Skill 正文作为 ToolMessage 进入消息历史；这里只保存本轮加载审计记录。
     skill_trace: list[dict]
     context_metrics: dict
     compaction_events: list[dict]
@@ -183,7 +176,7 @@ class ChatResponse(BaseModel):
     tool_trace: list[ToolTrace]
     context_metrics: ContextMetrics
     token_usage: TurnTokenUsage
-    running_summary: RunningSummary
+    context_summary: ContextSummary
     attachment_artifacts: list[dict]
     compacted: bool
 

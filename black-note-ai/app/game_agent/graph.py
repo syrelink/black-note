@@ -2,10 +2,10 @@
 
 一轮请求的主路径：
 START → TurnContext → ContextCompaction → Agent
-→（可选 ToolExecution → ProcessToolResults → ContextCompaction → Agent）→ END。
+→（可选 ToolExecution → ContextCompaction → Agent）→ END。
 
 当前轮图片已经位于 HumanMessage 的多模态内容中，主模型会直接读取原图；
-只有图片所在旧轮次被压缩时，memory.py 才生成 VisualMemory 并写入 RunningSummary。
+图片所在旧轮次被压缩时，原图与同轮文字一起进入摘要模型并写入 ContextSummary。
 """
 
 from __future__ import annotations
@@ -18,29 +18,29 @@ from typing import Literal
 from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from app.game_agent.image_memory import ImageMemoryService
+from app.game_agent.attachments import AttachmentLoader, hydrate_current_images
 from app.game_agent.memory import (
     ContextBudget,
     ContextManager,
-    calibrate_token_ledger,
+    context_summary_from_state,
     message_tokens,
+    record_token_observation,
     sync_token_ledger,
 )
 from app.game_agent.models import (
     ContextMetrics,
     HarnessState,
-    RunningSummary,
     ToolTrace,
     TurnTokenUsage,
 )
-from app.game_agent.prompts import FORCE_FINISH_PROMPT, build_agent_system_prompt
+from app.game_agent.prompts import build_agent_system_prompt
 from app.game_agent.skills import SkillRegistry
 from app.game_agent.tools import AGENT_TOOLS, configure_search_planner, skill_registry
 from app.game_agent.tracing import create_tool_call_wrapper
@@ -54,32 +54,6 @@ def create_model(prefix: str = "GAME_ASSISTANT") -> ChatOpenAI:
         base_url=os.getenv(f"{prefix}_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL"),
         temperature=0.2,
     )
-
-
-def close_tool_calls_for_force_finish(message: AIMessage) -> tuple[list[ToolMessage], list[ToolTrace]]:
-    """为未执行的 Tool Call 补齐 ToolMessage，保持消息协议合法。"""
-    tool_messages = []
-    traces = []
-    for call in message.tool_calls:
-        name = call.get("name", "unknown")
-        content = json.dumps({
-            "error": "tool call skipped because the per-turn tool round limit was reached",
-            "tool": name,
-        }, ensure_ascii=False)
-        tool_messages.append(ToolMessage(
-            content=content,
-            tool_call_id=call.get("id", name),
-            name=name,
-            id=str(uuid4()),
-        ))
-        traces.append(ToolTrace(
-            name=name,
-            arguments=call.get("args", {}),
-            status="error",
-            preview=content,
-            latency_ms=0,
-        ))
-    return tool_messages, traces
 
 
 @dataclass
@@ -100,15 +74,17 @@ class GameAgentHarness:
         return update
 
 
-def build_game_assistant(checkpointer) -> GameAgentHarness:
+def build_game_assistant(
+    checkpointer,
+    attachment_loader: AttachmentLoader | None = None,
+) -> GameAgentHarness:
     """组装节点依赖、定义节点函数并编译 LangGraph。"""
-    # MiMo 同时负责文字、当前轮原图、工具选择、Query 规划和历史图片摘要。
+    # MiMo 同时负责文字、图片、工具选择、Query 规划和统一上下文摘要。
     model = create_model()
     tools = AGENT_TOOLS
     configure_search_planner(model)
     budget = ContextBudget.from_env()
-    image_memory_service = ImageMemoryService(model)
-    context_manager = ContextManager(model, budget, image_service=image_memory_service)
+    context_manager = ContextManager(model, budget)
     tool_node = ToolNode(
         tools,
         handle_tool_errors=True,
@@ -122,23 +98,7 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
     )
     # bind_tools 只把 Schema 告诉模型；官方 ToolNode 负责并发执行和协议闭合。
     model_with_tools = model.bind_tools(tools)
-    max_tool_rounds = int(os.getenv("GAME_MAX_TOOL_ROUNDS", "3"))
     agent_system_prompt = build_agent_system_prompt(skill_registry.catalog_prompt())
-
-    def skill_system_messages(state: HarnessState) -> list[SystemMessage]:
-        """仅为当前一轮临时注入已激活 Skill，避免正文进入持久 messages。"""
-        documents = []
-        for name in state.get("active_skills", []):
-            documents.append(skill_registry.load(name))
-        for key in state.get("loaded_skill_resources", []):
-            name, resource = skill_registry.split_resource_key(key)
-            documents.append(skill_registry.load(name, resource))
-        return [SystemMessage(content=(
-            "【已加载的受信任 Skill 指令】\n"
-            f"Skill: {document.name}\n"
-            f"Resource: {document.resource or 'SKILL.md'}\n\n"
-            f"{document.content}"
-        )) for document in documents]
 
     async def stream_model(runnable, model_context, node: str):
         """流式调用模型，并发布请求、首字和完成三个可观测事件。"""
@@ -200,6 +160,8 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
             "ttft_ms": int((first_token_at - started) * 1000) if first_token_at else None,
             "generation_ms": generation_ms,
             "input_tokens": int(usage.get("input_tokens") or estimated_input_tokens),
+            "estimated_input_tokens": estimated_input_tokens,
+            "provider_input_tokens": int(usage["input_tokens"]) if usage.get("input_tokens") else None,
             "output_tokens": output_tokens,
             "tokens_per_second": round(output_tokens / (generation_ms / 1000), 2) if generation_ms else None,
             "output_chunks": output_chunks,
@@ -229,15 +191,13 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
         })
 
     def build_turn_context(state: HarnessState):
-        """创建本轮 TurnContext：重置临时状态并同步新增消息的 Token 记录。"""
-        summary = RunningSummary.model_validate(state.get("running_summary", {}))
+        """创建本轮 TurnContext：重置本轮审计状态并同步 Token 估算缓存。"""
+        summary = context_summary_from_state(state)
         ledger = sync_token_ledger(
             state.get("messages", []), state.get("token_ledger"), summary
         )
         return {
             "tool_trace": [],
-            "active_skills": [],
-            "loaded_skill_resources": [],
             "skill_trace": [],
             "tool_rounds": 0,
             "turn_count": state.get("turn_count", 0) + 1,
@@ -247,30 +207,40 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
             "turn_token_usage": TurnTokenUsage().model_dump(),
         }
 
-    async def run_context_compaction(state: HarnessState):
-        """在每次模型调用前检查压力，并流式发布压缩生命周期事件。"""
+    def publish_harness_event(event: dict) -> None:
+        """图以流式模式运行时发布审计事件；普通调用和测试中静默跳过。"""
         try:
             writer = get_stream_writer()
         except RuntimeError:
-            writer = lambda _: None
+            return
+        writer({"kind": "harness_event", "event": event})
+
+    async def run_context_compaction(state: HarnessState):
+        """检查当前上下文压力，并返回无需压缩或完成压缩后的 State 增量。"""
         return await context_manager.compact(
             state,
-            emit=lambda event: writer({"kind": "harness_event", "event": event}),
+            emit=publish_harness_event,
             node="ContextCompaction",
         )
 
-    async def call_agent(state: HarnessState):
-        """组装 System、Summary 和近期多模态消息，让模型回答或请求工具。"""
+    async def call_agent(state: HarnessState, config: RunnableConfig):
+        """组装持久文本上下文，并只为本次请求临时还原当前 Turn 的图片。"""
         model_context = context_manager.build_model_context(
             state,
             agent_system_prompt,
-            skill_system_messages(state),
+        )
+        session_id = str(config.get("configurable", {}).get("thread_id", ""))
+        model_context = await hydrate_current_images(
+            model_context,
+            state.get("current_attachments", []),
+            session_id=session_id,
+            loader=attachment_loader,
         )
         # 模型返回普通文本时结束；返回 tool_calls 时由条件边进入 ToolExecution。
         response = await stream_model(model_with_tools, model_context, "Agent")
         if not response.id:
             response.id = str(uuid4())
-        summary = RunningSummary.model_validate(state.get("running_summary", {}))
+        summary = context_summary_from_state(state)
         ledger = sync_token_ledger(
             [*state.get("messages", []), response],
             state.get("token_ledger"),
@@ -279,7 +249,7 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
         estimated_prompt_tokens = message_tokens(model_context)
         usage = getattr(response, "usage_metadata", None) or {}
         actual_prompt_tokens = usage.get("input_tokens")
-        ledger = calibrate_token_ledger(
+        ledger = record_token_observation(
             ledger.model_dump(), estimated_prompt_tokens, actual_prompt_tokens
         )
         metrics = ContextMetrics.model_validate(state.get("context_metrics", {})).model_copy(
@@ -293,131 +263,74 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
             }
         )
         token_usage = accumulate_token_usage(state, response, model_context)
+        attachment_artifacts = dict(state.get("attachment_artifacts", {}))
+        response_text = response.content if isinstance(response.content, str) else json.dumps(
+            response.content, ensure_ascii=False, default=str
+        )
+        for item in state.get("current_attachments", []):
+            attachment_id = str(item.get("attachment_id", ""))
+            if not attachment_id:
+                continue
+            attachment_artifacts[attachment_id] = {
+                "artifact_id": attachment_id,
+                "kind": "image_reference",
+                "name": item.get("name"),
+                "mime_type": item.get("mime_type"),
+                "size": item.get("size", 0),
+                "summary": response_text[:1600],
+            }
         return {
             "messages": [response],
+            "attachment_artifacts": attachment_artifacts,
             "llm_calls": state.get("llm_calls", 0) + 1,
             "context_metrics": metrics.model_dump(),
             "token_ledger": ledger.model_dump(),
             "turn_token_usage": token_usage.model_dump(),
         }
 
-    def route_after_agent(state: HarnessState) -> Literal["ToolExecution", "ForceFinish", "end"]:
-        """根据最后一条 AIMessage 决定结束、执行工具或强制收敛。"""
+    def route_after_agent(state: HarnessState) -> Literal["ToolExecution", "end"]:
+        """模型请求工具时继续循环，否则结束当前 Turn。"""
         last = state["messages"][-1]
         if not getattr(last, "tool_calls", None):
             return "end"
-        if state.get("tool_rounds", 0) >= max_tool_rounds:
-            return "ForceFinish"
         return "ToolExecution"
 
-    async def process_tool_results(state: HarnessState):
-        """解析 ToolNode 结果，并登记 Skill、工具轨迹、轮次和 Token 账本。"""
-        tool_messages = []
-        for message in reversed(state.get("messages", [])):
-            if isinstance(message, ToolMessage):
-                tool_messages.append(message)
-                continue
-            break
-        tool_messages.reverse()
+    async def execute_tools(state: HarnessState):
+        """执行本批工具，并在同一节点完成 ToolMessage、轨迹和 Skill 审计。"""
+        tool_update = await tool_node.ainvoke(state)
+        tool_messages = [
+            message for message in tool_update.get("messages", [])
+            if isinstance(message, ToolMessage)
+        ]
         traces = [
             ToolTrace.model_validate(message.artifact["harness_trace"])
             for message in tool_messages
             if isinstance(message.artifact, dict) and message.artifact.get("harness_trace")
         ]
         existing_trace = [ToolTrace.model_validate(item) for item in state.get("tool_trace", [])]
-        active_skills = list(state.get("active_skills", []))
-        loaded_resources = list(state.get("loaded_skill_resources", []))
         skill_trace = list(state.get("skill_trace", []))
         for trace in traces:
-            if trace.name != "load_skill" or trace.status != "success":
+            if trace.name not in {"skill", "read_skill_reference"} or trace.status != "success":
                 continue
             name = str(trace.arguments.get("name", "")).strip()
-            resource = trace.arguments.get("resource")
-            if name and name not in active_skills:
-                active_skills.append(name)
-            if name and resource:
-                key = skill_registry.resource_key(name, str(resource).strip())
-                if key not in loaded_resources:
-                    loaded_resources.append(key)
-            skill_trace.append({"name": name, "resource": resource or None})
-        summary = RunningSummary.model_validate(state.get("running_summary", {}))
+            resource = trace.arguments.get("path")
+            skill_trace.append({
+                "name": name,
+                "resource": resource or None,
+                "tool": trace.name,
+            })
+        summary = context_summary_from_state(state)
         ledger = sync_token_ledger(
-            state.get("messages", []),
+            [*state.get("messages", []), *tool_messages],
             state.get("token_ledger"),
             summary,
         )
         return {
+            "messages": tool_messages,
             "tool_trace": [trace.model_dump() for trace in [*existing_trace, *traces]],
-            "active_skills": active_skills,
-            "loaded_skill_resources": loaded_resources,
             "skill_trace": skill_trace,
             "tool_rounds": state.get("tool_rounds", 0) + 1,
             "token_ledger": ledger.model_dump(),
-        }
-
-    async def force_finish(state: HarnessState):
-        """达到工具轮次上限后先整理上下文，再仅用已有证据生成最终回答。"""
-        try:
-            writer = get_stream_writer()
-        except RuntimeError:
-            writer = lambda _: None
-        compaction_update = await context_manager.compact(
-            state,
-            emit=lambda event: writer({"kind": "harness_event", "event": event}),
-            node="ForceFinish",
-        )
-        compacted_state = {**state, **compaction_update}
-        if compaction_update.get("messages"):
-            compacted_state["messages"] = add_messages(
-                state.get("messages", []),
-                compaction_update["messages"],
-            )
-        last = compacted_state["messages"][-1]
-        closing_messages, skipped_traces = close_tool_calls_for_force_finish(last)
-        model_context = context_manager.build_model_context(
-            compacted_state,
-            agent_system_prompt,
-            [*skill_system_messages(compacted_state), SystemMessage(content=FORCE_FINISH_PROMPT)],
-        )
-        model_context.extend(closing_messages)
-        response = await stream_model(model, model_context, "ForceFinish")
-        final_message = AIMessage(content=response.content, id=str(uuid4()))
-        summary = RunningSummary.model_validate(compacted_state.get("running_summary", {}))
-        ledger = sync_token_ledger(
-            [*compacted_state.get("messages", []), *closing_messages, final_message],
-            compacted_state.get("token_ledger"),
-            summary,
-        )
-        estimated_prompt_tokens = message_tokens(model_context)
-        usage = getattr(response, "usage_metadata", None) or {}
-        actual_prompt_tokens = usage.get("input_tokens")
-        ledger = calibrate_token_ledger(
-            ledger.model_dump(), estimated_prompt_tokens, actual_prompt_tokens
-        )
-        metrics = ContextMetrics.model_validate(compacted_state.get("context_metrics", {})).model_copy(
-            update={
-                "active_message_tokens": ledger.active_message_tokens,
-                "summary_tokens": ledger.summary_tokens,
-                "model_input_tokens": actual_prompt_tokens or (
-                    estimated_prompt_tokens + ledger.protocol_overhead_tokens
-                ),
-                "model_input_source": "api_usage" if actual_prompt_tokens else "estimated",
-            }
-        )
-        token_usage = accumulate_token_usage(compacted_state, response, model_context)
-        existing_trace = [ToolTrace.model_validate(item) for item in compacted_state.get("tool_trace", [])]
-        return {
-            **compaction_update,
-            "messages": [
-                *compaction_update.get("messages", []),
-                *closing_messages,
-                final_message,
-            ],
-            "tool_trace": [trace.model_dump() for trace in [*existing_trace, *skipped_traces]],
-            "llm_calls": compacted_state.get("llm_calls", 0) + 1,
-            "token_ledger": ledger.model_dump(),
-            "context_metrics": metrics.model_dump(),
-            "turn_token_usage": token_usage.model_dump(),
         }
 
     # 第一部分：注册节点。节点只返回 State 增量，LangGraph 负责合并。
@@ -425,9 +338,7 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
     builder.add_node("TurnContext", build_turn_context)
     builder.add_node("ContextCompaction", run_context_compaction)
     builder.add_node("Agent", call_agent)
-    builder.add_node("ToolExecution", tool_node)
-    builder.add_node("ProcessToolResults", process_tool_results)
-    builder.add_node("ForceFinish", force_finish)
+    builder.add_node("ToolExecution", execute_tools)
     # 第二部分：连接固定边和条件边，明确一轮请求所有可能的执行路径。
     builder.add_edge(START, "TurnContext")
     builder.add_edge("TurnContext", "ContextCompaction")
@@ -437,14 +348,11 @@ def build_game_assistant(checkpointer) -> GameAgentHarness:
         route_after_agent,
         {
             "ToolExecution": "ToolExecution",
-            "ForceFinish": "ForceFinish",
             "end": END,
         },
     )
-    # ToolNode 写回 ToolMessage；随后更新业务状态，再让模型基于证据继续推理。
-    builder.add_edge("ToolExecution", "ProcessToolResults")
-    builder.add_edge("ProcessToolResults", "ContextCompaction")
-    builder.add_edge("ForceFinish", END)
+    # 工具节点同时写回 ToolMessage 与审计信息，再测压并继续 Agent 循环。
+    builder.add_edge("ToolExecution", "ContextCompaction")
 
     # checkpointer 让同一个 thread_id 可以跨请求、跨服务重启恢复 State。
     return GameAgentHarness(

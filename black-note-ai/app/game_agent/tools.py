@@ -61,22 +61,46 @@ def _error_json(question: str, mode: str, error: Exception) -> str:
 
 
 @tool
-def load_skill(name: str, resource: str | None = None) -> str:
-    """加载一个可用 Skill 的专业工作流；仅当已加载 Skill 明确要求时才传入 references/xxx.md。"""
+def skill(name: str) -> str:
+    """按名称加载一个 Skill；返回完整 SKILL.md，供下一次 Agent Step 按其中流程执行。"""
     try:
-        document = skill_registry.load(name.strip(), resource.strip() if resource else None)
+        document = skill_registry.load(name.strip())
     except Exception as exc:
         return json.dumps({
             "error": str(exc),
             "error_type": exc.__class__.__name__,
-            "tool": "load_skill",
+            "tool": "skill",
+        }, ensure_ascii=False)
+    return json.dumps({
+        "status": "loaded",
+        "skill": document.name,
+        "content": document.content,
+        "output_items": [{
+            "type": "skill_load",
+            "skill": document.name,
+            "status": "loaded",
+        }],
+    }, ensure_ascii=False)
+
+
+@tool
+def read_skill_reference(name: str, path: str) -> str:
+    """读取 Skill 明确引用的 references/*.md；只有 SKILL.md 要求且任务需要时才调用。"""
+    try:
+        document = skill_registry.load(name.strip(), path.strip())
+    except Exception as exc:
+        return json.dumps({
+            "error": str(exc),
+            "error_type": exc.__class__.__name__,
+            "tool": "read_skill_reference",
         }, ensure_ascii=False)
     return json.dumps({
         "status": "loaded",
         "skill": document.name,
         "resource": document.resource,
+        "content": document.content,
         "output_items": [{
-            "type": "skill_load",
+            "type": "skill_reference_load",
             "skill": document.name,
             "resource": document.resource,
             "status": "loaded",
@@ -111,4 +135,4 @@ _plain_text = plain_text
 _DuckDuckGoParser = DuckDuckGoParser
 
 # 只有列表中的函数会通过 model.bind_tools 暴露给主 Agent。
-AGENT_TOOLS = [load_skill, web_search]
+AGENT_TOOLS = [skill, read_skill_reference, web_search]

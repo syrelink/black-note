@@ -19,11 +19,10 @@ from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage, Sys
 from langchain_core.messages.utils import count_tokens_approximately
 
 from app.game_agent.models import (
+    ContextSummary,
     ContextMetrics,
     HarnessState,
-    RunningSummary,
     TokenLedger,
-    VisualMemory,
 )
 from app.game_agent.prompts import COMPACTION_PROMPT, SUMMARY_REDUCE_PROMPT
 from app.game_agent.structured import invoke_validated_json
@@ -80,11 +79,10 @@ class ContextBudget:
 
 
 def message_tokens(messages: list[AnyMessage]) -> int:
-    """估算文本与图片 Token；不会把 Base64 字符串误算成数十万文本 Token。"""
+    """估算文本 Token；图片成本由模型返回的真实 Usage 统一校准。"""
     if not messages:
         return 0
     normalized = []
-    image_tokens = 0
     for message in messages:
         if not isinstance(message.content, list):
             normalized.append(message)
@@ -95,11 +93,8 @@ def message_tokens(messages: list[AnyMessage]) -> int:
                 continue
             if block.get("type") in {"text", "input_text"}:
                 text_parts.append(str(block.get("text", "")))
-            elif block.get("type") in {"image_url", "input_image", "image"}:
-                # 精确图片 Token 由供应商按分辨率结算；预算层使用保守固定估值。
-                image_tokens += int(os.getenv("GAME_IMAGE_ESTIMATED_TOKENS", "1600"))
         normalized.append(message.model_copy(update={"content": "\n".join(text_parts)}))
-    return count_tokens_approximately(normalized) + image_tokens
+    return count_tokens_approximately(normalized)
 
 
 def _message_key(message: AnyMessage, index: int = 0) -> str:
@@ -124,7 +119,7 @@ def _message_fingerprint(message: AnyMessage) -> str:
 def sync_token_ledger(
     messages: list[AnyMessage],
     ledger_data: dict | None = None,
-    summary: RunningSummary | None = None,
+    summary: ContextSummary | None = None,
 ) -> TokenLedger:
     """只为新增或被替换的消息计算 Token，并清理已删除消息的记录。"""
     ledger = TokenLedger.model_validate(ledger_data or {})
@@ -150,20 +145,15 @@ def sync_token_ledger(
     return ledger
 
 
-def calibrate_token_ledger(
+def record_token_observation(
     ledger_data: dict | None,
     estimated_prompt_tokens: int,
     actual_prompt_tokens: int | None,
 ) -> TokenLedger:
-    """用供应商 usage 平滑校准未被本地估算覆盖的协议与 Tool Schema 开销。"""
+    """记录本地估算与供应商 Usage；观测值不参与下一次上下文决策。"""
     ledger = TokenLedger.model_validate(ledger_data or {})
     ledger.last_estimated_prompt_tokens = estimated_prompt_tokens
     ledger.last_actual_prompt_tokens = actual_prompt_tokens
-    if actual_prompt_tokens is None or actual_prompt_tokens <= 0:
-        return ledger
-    observed_overhead = max(0, actual_prompt_tokens - estimated_prompt_tokens)
-    previous = ledger.protocol_overhead_tokens
-    ledger.protocol_overhead_tokens = round(previous * 0.7 + observed_overhead * 0.3)
     return ledger
 
 
@@ -253,18 +243,42 @@ def split_by_balanced_units(
     )
 
 
+def context_summary_from_state(state: HarnessState | dict) -> ContextSummary:
+    """读取 ContextSummary，并兼容更早版本的 running_summary。"""
+    current = state.get("context_summary")
+    if current:
+        return ContextSummary.model_validate(current)
+    legacy = state.get("running_summary") or {}
+    if not legacy:
+        return ContextSummary()
+    critical_context = [
+        *[f"已识别游戏：{item}" for item in legacy.get("resolved_games", [])],
+        *[f"已识别实体：{item}" for item in legacy.get("resolved_entities", [])],
+        *[f"用户偏好或约束：{item}" for item in legacy.get("user_preferences", [])],
+        *legacy.get("confirmed_facts", []),
+        *[f"既有决策：{item}" for item in legacy.get("current_decisions", [])],
+    ]
+    if legacy.get("narrative"):
+        critical_context.append(str(legacy["narrative"]))
+    return ContextSummary(
+        primary_request_and_intent=[legacy["active_goal"]] if legacy.get("active_goal") else [],
+        pending_tasks=list(legacy.get("unresolved_questions", [])),
+        critical_context=critical_context,
+        important_tool_results=list(legacy.get("important_tool_results", [])),
+        referenced_artifacts=list(legacy.get("attachment_refs", [])),
+    )
+
+
 class ContextManager:
-    """决定何时压缩、生成 RunningSummary，并组装下一次模型输入。"""
+    """决定何时压缩、生成 ContextSummary，并组装下一次模型输入。"""
 
     def __init__(
         self,
         summary_model: BaseChatModel | None,
         budget: ContextBudget | None = None,
-        image_service=None,
     ):
         self.summary_model = summary_model
         self.budget = budget or ContextBudget.from_env()
-        self.image_service = image_service
         self.summary_timeout_seconds = float(os.getenv("GAME_SUMMARY_TIMEOUT_SECONDS", "12"))
 
     async def compact(
@@ -276,7 +290,7 @@ class ContextManager:
     ) -> dict:
         """在每次模型调用前测压，必要时剪枝并建立滚动摘要检查点。"""
         messages = state.get("messages", [])
-        existing = RunningSummary.model_validate(state.get("running_summary", {}))
+        existing = context_summary_from_state(state)
         ledger = sync_token_ledger(messages, state.get("token_ledger"), existing)
         active_tokens = ledger.active_message_tokens
         summary_tokens = ledger.summary_tokens
@@ -314,6 +328,20 @@ class ContextManager:
             summary_version=state.get("summary_version", previous_metrics.summary_version),
             fallback_used=previous_metrics.fallback_used,
         )
+        if emit is not None:
+            emit({
+                "event_type": "context/pressure",
+                "component": "context",
+                "node": node,
+                "status": "measured",
+                "source": "local_estimate",
+                "estimated_input_tokens": estimated_input_tokens,
+                "trigger_tokens": self.budget.trigger_tokens,
+                "pressure_ratio": round(
+                    estimated_input_tokens / self.budget.context_window_tokens, 4
+                ),
+                "will_compact": bool(should_compact),
+            })
         if not should_compact:
             return {
                 "context_metrics": base_metrics.model_dump(),
@@ -432,13 +460,7 @@ class ContextManager:
             if _message_key(message, index) in expired_keys
         ]
 
-        serialized_messages = await self._serialize_messages(expired)
-        payload = {
-            "existing_summary": existing.model_dump(),
-            "newly_expired_messages": serialized_messages,
-            "summary_token_budget": self.budget.summary_tokens,
-        }
-        summary, fallback_used = await self._generate_summary(payload)
+        summary, fallback_used = await self._generate_summary(existing, expired)
         summary = await self._enforce_summary_budget(summary)
         next_summary_version = state.get("summary_version", 0) + 1
         # LangGraph 的消息 Reducer 通过 RemoveMessage 真正移除已摘要的历史消息。
@@ -475,7 +497,6 @@ class ContextManager:
             summary_tokens=summary_tokens,
             summary_version=next_summary_version,
             fallback_used=fallback_used,
-            visual_memory_count=len(summary.visual_memories),
             retry_count=retry_count,
         )
         metrics = base_metrics.model_copy(update={
@@ -514,7 +535,8 @@ class ContextManager:
         )
         update = {
             "messages": [*pruned_replacements, *removals],
-            "running_summary": summary.model_dump(),
+            "context_summary": summary.model_dump(),
+            "running_summary": {},
             "context_metrics": metrics.model_dump(),
             "token_ledger": ledger.model_dump(),
             "compacted": True,
@@ -531,12 +553,12 @@ class ContextManager:
         system_prompt: str,
         extra_system_messages: list[SystemMessage] | None = None,
     ) -> list[AnyMessage]:
-        """按 System Prompt、Running Summary、近期消息的顺序组装输入。"""
+        """按 System Prompt、ContextSummary、近期消息的顺序组装输入。"""
         messages: list[AnyMessage] = [SystemMessage(content=system_prompt)]
-        summary = RunningSummary.model_validate(state.get("running_summary", {}))
+        summary = context_summary_from_state(state)
         if any(summary.model_dump().values()):
             messages.append(SystemMessage(
-                content="【Running Summary：较早历史的当前有效状态】\n"
+                content="【ContextSummary：较早历史的结构化任务摘要】\n"
                 + json.dumps(summary.model_dump(), ensure_ascii=False)
             ))
         if extra_system_messages:
@@ -580,25 +602,34 @@ class ContextManager:
             pruned_ids.append(key)
         return working, replacements, pruned_ids
 
-    async def _generate_summary(self, payload: dict) -> tuple[RunningSummary, bool]:
-        """调用摘要模型；超时或失败时立即使用确定性降级摘要。"""
+    async def _generate_summary(
+        self,
+        existing: ContextSummary,
+        expired_messages: list[AnyMessage],
+    ) -> tuple[ContextSummary, bool]:
+        """把过期轮次的文字与图片一起交给摘要模型。"""
         if self.summary_model is None:
-            return self._fallback_summary(payload), True
+            return self._fallback_summary(existing, expired_messages), True
+        instruction = HumanMessage(content=(
+            f"{COMPACTION_PROMPT}\n\n"
+            f"Existing ContextSummary：{json.dumps(existing.model_dump(), ensure_ascii=False)}\n"
+            f"Summary Token Budget：{self.budget.summary_tokens}"
+        ))
         try:
             summary = await asyncio.wait_for(
                 invoke_validated_json(
                     self.summary_model,
-                    RunningSummary,
-                    [HumanMessage(content=f"{COMPACTION_PROMPT}\n\n{json.dumps(payload, ensure_ascii=False)}")],
+                    ContextSummary,
+                    [*expired_messages, instruction],
                     max_tokens=self.budget.summary_tokens,
                 ),
                 timeout=self.summary_timeout_seconds,
             )
             return summary, False
         except Exception:
-            return self._fallback_summary(payload), True
+            return self._fallback_summary(existing, expired_messages), True
 
-    async def _enforce_summary_budget(self, summary: RunningSummary) -> RunningSummary:
+    async def _enforce_summary_budget(self, summary: ContextSummary) -> ContextSummary:
         """摘要超额时先尝试模型精简，失败后按字段优先级确定性淘汰。"""
         if self._summary_tokens(summary) <= self.budget.summary_tokens:
             return summary
@@ -608,7 +639,7 @@ class ContextManager:
             reduced = await asyncio.wait_for(
                 invoke_validated_json(
                     self.summary_model,
-                    RunningSummary,
+                    ContextSummary,
                     [HumanMessage(content=(
                         f"{SUMMARY_REDUCE_PROMPT}\n预算：{self.budget.summary_tokens} tokens\n"
                         f"待压缩内容：{json.dumps(summary.model_dump(), ensure_ascii=False)}"
@@ -624,59 +655,56 @@ class ContextManager:
             pass
         return self._deterministic_reduce(summary)
 
-    def _fallback_summary(self, payload: dict) -> RunningSummary:
+    def _fallback_summary(
+        self,
+        existing: ContextSummary,
+        expired_messages: list[AnyMessage],
+    ) -> ContextSummary:
         """摘要模型超时或不可用时立即降级，避免阻塞整轮对话。"""
-        existing = RunningSummary.model_validate(payload["existing_summary"])
-        visual_memories = []
-        for message in payload["newly_expired_messages"]:
-            content = message.get("content", [])
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "visual_memory":
-                    visual_memories.append(VisualMemory.model_validate(block["memory"]))
-        known_sources = {item.source_message_id for item in existing.visual_memories}
-        existing.visual_memories.extend(
-            item for item in visual_memories if item.source_message_id not in known_sources
+        summary = existing.model_copy(deep=True)
+        serialized = json.dumps(
+            [self._fallback_message(message) for message in expired_messages],
+            ensure_ascii=False,
         )
-        serialized = json.dumps(payload["newly_expired_messages"], ensure_ascii=False)
-        existing.narrative = self._truncate_text(
-            f"{existing.narrative}\n{serialized}",
-            self.budget.summary_tokens,
+        summary.critical_context.append(
+            self._truncate_text(serialized, self.budget.summary_tokens)
         )
-        return self._deterministic_reduce(existing)
+        return self._deterministic_reduce(summary)
 
     def _deterministic_reduce(
         self,
-        summary: RunningSummary,
+        summary: ContextSummary,
         target_tokens: int | None = None,
-    ) -> RunningSummary:
+    ) -> ContextSummary:
         """不调用模型的有界裁剪，保证任何异常下摘要都不会无限增长。"""
         data = summary.model_dump()
         target = max(
             target_tokens if target_tokens is not None else self.budget.summary_tokens,
-            self._summary_tokens(RunningSummary()),
+            self._summary_tokens(ContextSummary()),
         )
-        data["active_goal"] = data["active_goal"][:400]
-        for field in ("important_tool_results", "confirmed_facts", "current_decisions"):
+        data["next_step"] = data["next_step"][:400]
+        for field in ("important_tool_results", "errors_and_recoveries", "current_work"):
             data[field] = [item[:320] for item in data[field][-8:]]
-        for field in ("resolved_games", "resolved_entities", "user_preferences", "unresolved_questions", "attachment_refs"):
+        for field in (
+            "primary_request_and_intent",
+            "key_concepts",
+            "completed_work",
+            "pending_tasks",
+            "critical_context",
+            "referenced_artifacts",
+        ):
             data[field] = [item[:200] for item in data[field][-12:]]
-        data["visual_memories"] = data["visual_memories"][-8:]
-        data["narrative"] = self._truncate_text(data["narrative"], max(200, target // 2))
-        reduced = RunningSummary.model_validate(data)
-        if self._summary_tokens(reduced) > target:
-            reduced.narrative = ""
+        reduced = ContextSummary.model_validate(data)
         eviction_order = (
             "important_tool_results",
-            "confirmed_facts",
-            "current_decisions",
-            "resolved_entities",
-            "visual_memories",
-            "attachment_refs",
-            "user_preferences",
-            "resolved_games",
-            "unresolved_questions",
+            "completed_work",
+            "errors_and_recoveries",
+            "key_concepts",
+            "referenced_artifacts",
+            "critical_context",
+            "current_work",
+            "pending_tasks",
+            "primary_request_and_intent",
         )
         while self._summary_tokens(reduced) > target:
             changed = False
@@ -687,68 +715,32 @@ class ContextManager:
                     changed = True
                     break
             if not changed:
-                reduced.active_goal = reduced.active_goal[: max(0, len(reduced.active_goal) // 2)]
-                if not reduced.active_goal:
+                reduced.next_step = reduced.next_step[: max(0, len(reduced.next_step) // 2)]
+                if not reduced.next_step:
                     break
         return reduced
 
-    async def _serialize_messages(
-        self,
-        messages: list[AnyMessage],
-    ) -> list[dict]:
-        """序列化过期消息，并把其中原图直接转换成 VisualMemory。"""
-        serialized = []
-        image_cache: dict[str, VisualMemory] = {}
-        for message in messages:
-            content = message.content
-            if isinstance(content, str):
-                # 历史工具正文可能很大；摘要只需保留结论线索，不应再次吞入整页内容。
-                limit = 1600 if message.type == "tool" else 3200
-                content = content[:limit]
-            elif isinstance(content, list):
-                compact_blocks = []
-                for block in content:
-                    image = self._image_url(block)
-                    if not image:
-                        compact_blocks.append(block)
-                        continue
-                    cache_key = str(hash(image))
-                    memory = image_cache.get(cache_key)
-                    if memory is None and self.image_service is not None:
-                        memory = await self.image_service.summarize(image, str(message.id or ""))
-                        image_cache[cache_key] = memory
-                    compact_blocks.append({
-                        "type": "visual_memory",
-                        "memory": (memory or VisualMemory(
-                            source_message_id=str(message.id or ""),
-                            key_facts=["历史图片未能生成摘要。"],
-                        )).model_dump(),
-                    })
-                content = compact_blocks
-            item = {"type": message.type, "content": content}
-            if getattr(message, "tool_calls", None):
-                item["tool_calls"] = message.tool_calls
-            if getattr(message, "name", None):
-                item["name"] = message.name
-            serialized.append(item)
-        return serialized
-
     @staticmethod
-    def _image_url(block) -> str | None:
-        """兼容 OpenAI 风格 image_url 内容块并提取 URL 或 Data URL。"""
-        if not isinstance(block, dict) or block.get("type") not in {"image_url", "input_image", "image"}:
-            return None
-        image = block.get("image_url") or block.get("url")
-        if isinstance(image, dict):
-            image = image.get("url")
-        return image if isinstance(image, str) else None
+    def _fallback_message(message: AnyMessage) -> dict:
+        """降级摘要只保留文本和图片占位，不把 Base64 写入 ContextSummary。"""
+        content = message.content
+        if isinstance(content, str):
+            content = content[:3200]
+        elif isinstance(content, list):
+            content = [
+                block
+                if isinstance(block, dict) and block.get("type") in {"text", "input_text"}
+                else {"type": "image", "note": "摘要模型不可用，未保留图片语义"}
+                for block in content
+            ]
+        return {"type": message.type, "content": content}
 
     @staticmethod
     def _truncate_text(text: str, max_tokens: int) -> str:
         return text[: max_tokens * 4]
 
     @staticmethod
-    def _summary_tokens(summary: RunningSummary) -> int:
+    def _summary_tokens(summary: ContextSummary) -> int:
         if not any(summary.model_dump().values()):
             return 0
         content = json.dumps(summary.model_dump(), ensure_ascii=False)

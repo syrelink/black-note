@@ -617,9 +617,9 @@
       if (status) { const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = status; head.append(badge); }
       const flow = document.createElement('div'); flow.className = 'graph-flow';
       const nodeMap = new Map();
-      const visible = data.nodes || ['TurnContext', 'ContextCompaction', 'Agent', 'ToolExecution', 'ProcessToolResults', 'ForceFinish', 'END'];
+      const visible = data.nodes || ['TurnContext', 'ContextCompaction', 'Agent', 'ToolExecution', 'END'];
       visible.forEach((node, index) => { const item = document.createElement('span'); item.className = 'graph-node'; item.textContent = node; nodeMap.set(node, item); flow.append(item); if (index < visible.length - 1) { const arrow = document.createElement('span'); arrow.className = 'graph-arrow'; arrow.textContent = '→'; flow.append(arrow); } });
-      const edges = document.createElement('div'); edges.className = 'graph-edges'; edges.textContent = (data.edges || ['START → TurnContext', 'TurnContext → ContextCompaction', 'ContextCompaction → Agent', 'Agent → ToolExecution', 'ToolExecution → ProcessToolResults', 'ProcessToolResults → ContextCompaction', 'Agent → ForceFinish', 'Agent → END', 'ForceFinish → END']).join('\n');
+      const edges = document.createElement('div'); edges.className = 'graph-edges'; edges.textContent = (data.edges || ['START → TurnContext', 'TurnContext → ContextCompaction', 'ContextCompaction → Agent', 'Agent → ToolExecution', 'ToolExecution → ContextCompaction', 'Agent → END']).join('\n');
       const timelineElement = document.createElement('div'); timelineElement.className = 'timeline';
       card.append(head, flow, edges, timelineElement); target.append(card);
       return {nodeMap, timelineElement};
@@ -647,7 +647,7 @@
       lines.push(`窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)`);
       lines.push(`近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)`);
       lines.push(`Active ${metrics.active_message_tokens || 0}`);
-      lines.push(`Summary ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`);
+      lines.push(`Checkpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`);
       if (complete) lines.push(`消息 ${metrics.messages_before || 0} → ${metrics.messages_after || 0}`);
       return lines.join('\n');
     }
@@ -677,7 +677,7 @@
       const semanticDetail = data.event_type === 'compaction/start'
         ? `当前 ${data.tokens_before || 0} / 触发线 ${data.trigger_tokens || 0} tokens`
         : data.event_type === 'compaction/summary'
-          ? `Summary ${data.summary_tokens || 0} tokens · v${data.summary_version || 0}${data.fallback_used ? ' · 降级摘要' : ''}`
+          ? `Checkpoint ${data.summary_tokens || 0} tokens · v${data.summary_version || 0}${data.fallback_used ? ' · 降级存档' : ''}`
           : data.event_type === 'compaction/end'
             ? `${data.tokens_after || 0} tokens · ${data.converged ? '已回到预算内' : '仍高于预算'}`
             : data.event_type === 'model/end'
@@ -760,7 +760,7 @@
       graphNodes.forEach(node => node.classList.remove('active'));
       const graphNode = graphNodes.get(data.node); if (graphNode) graphNode.classList.add('active', 'done');
       timeline?.append(createNodeStep(data)); traceBody.scrollTop = 0;
-      if (['ContextCompaction', 'ForceFinish'].includes(data.node) && data.context_metrics) updateCurrentBudget(data);
+      if (data.node === 'ContextCompaction' && data.context_metrics) updateCurrentBudget(data);
     }
     function appendTrace(data) {
       const visibleEvents = new Set(['model/error', 'tool/error', 'turn/error']);
@@ -773,8 +773,8 @@
       const metrics = data.context_metrics || {};
       const usage = data.token_usage || {};
       updateCurrentBudget({...data, context_metrics: metrics, token_usage: usage}, true);
-      const summary = data.running_summary || {};
-      if (Object.values(summary).some(value => Array.isArray(value) ? value.length : Boolean(value))) currentTurnBody?.append(makeCard('json-card', 'Running Summary', `${metrics.summary_tokens || 0} tokens`, JSON.stringify(summary, null, 2)));
+      const summary = data.context_summary || {};
+      if (Object.values(summary).some(value => Array.isArray(value) ? value.length : Boolean(value))) currentTurnBody?.append(makeCard('json-card', 'Context Summary', `${metrics.summary_tokens || 0} tokens`, JSON.stringify(summary, null, 2)));
       if (currentTurnShell) {
         currentTurnShell.badge.textContent = '完成';
         currentTurnShell.detail.textContent = `${(data.elapsed_ms / 1000).toFixed(1)}s · ${data.tool_trace?.length || 0} 工具${data.compacted ? ' · 已压缩' : ''}`;
@@ -786,7 +786,7 @@
       if (!runs.length) {
         if (!checkpoint) { traceBody.innerHTML = '<div class="empty-trace">这个会话还没有可恢复的执行轨迹。</div>'; return; }
         const metrics = checkpoint.context_metrics || {};
-        traceBody.append(makeCard('metric-card', '最近 Checkpoint', checkpoint.compacted ? '已压缩' : '预算状态', `模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nSummary ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`));
+        traceBody.append(makeCard('metric-card', '最近 Checkpoint', checkpoint.compacted ? '已压缩' : '预算状态', `模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nCheckpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`));
         return;
       }
       for (const run of runs) {
@@ -803,7 +803,7 @@
         graph.nodeMap.get('END')?.classList.add('done');
         const metrics = run.context_metrics || {};
         const usage = metrics.turn_token_usage || {};
-        turn.body.append(makeCard('metric-card', 'Context Budget', run.compacted ? '自动压缩' : '预算内', `总耗时 ${(run.elapsed_ms / 1000).toFixed(1)}s\n本轮 Token ${usage.total_tokens || 0}（输入 ${usage.input_tokens || 0} / 输出 ${usage.output_tokens || 0}）· ${usage.model_calls || 0} 次模型调用\n最近模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nSummary ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`, false));
+        turn.body.append(makeCard('metric-card', 'Context Budget', run.compacted ? '自动压缩' : '预算内', `总耗时 ${(run.elapsed_ms / 1000).toFixed(1)}s\n本轮 Token ${usage.total_tokens || 0}（输入 ${usage.input_tokens || 0} / 输出 ${usage.output_tokens || 0}）· ${usage.model_calls || 0} 次模型调用\n最近模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nCheckpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`, false));
         traceBody.append(turn.shell);
       }
     }
@@ -928,7 +928,6 @@
               else if (packet.data.node === 'Agent' && requestedTools.length) {
                 resetStreamRender(`正在执行 ${requestedTools.map(call => call.name).join('、')}…`);
               } else if (packet.data.node === 'ToolExecution') loadingBubble.textContent = '正在结合搜索证据生成回答…';
-              else if (packet.data.node === 'ForceFinish') loadingBubble.textContent = '正在整理现有证据…';
             }
             else if (packet.event === 'trace') appendTrace(packet.data);
             else if (packet.event === 'final') finalData = packet.data;

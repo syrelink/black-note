@@ -8,18 +8,24 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from app.game_agent.attachments import AttachmentArtifactService, decode_data_url, extract_file_text
-from app.game_agent.graph import close_tool_calls_for_force_finish
+from app.attachment_store import MinioAttachmentStore
+from app.game_agent.attachments import (
+    AttachmentArtifactService,
+    decode_data_url,
+    extract_file_text,
+    hydrate_current_images,
+)
 from app.game_agent.memory import (
     ContextBudget,
     ContextManager,
-    calibrate_token_ledger,
+    context_summary_from_state,
+    record_token_observation,
     split_by_balanced_units,
     split_by_recent_budget,
     split_into_complete_turns,
     sync_token_ledger,
 )
-from app.game_agent.models import AttachmentInput, ChatRequest, HarnessState, RunningSummary, VisualMemory
+from app.game_agent.models import AttachmentInput, AttachmentRef, ChatRequest, ContextSummary, HarnessState
 from app.main import _restore_legacy_attachment_urls, _user_message
 from app.game_agent.search.deduplicator import deduplicate_results
 from app.game_agent.search.extractor import extract_page, relevant_passages
@@ -27,7 +33,14 @@ from app.game_agent.search.fetcher import is_safe_public_url
 from app.game_agent.search.models import Evidence, SearchAction, SearchReport, SearchResult, SearchStep
 from app.game_agent.search.query_rewriter import plan_queries, rewrite_queries
 from app.game_agent.search.service import GameSearchService
-from app.game_agent.tools import AGENT_TOOLS, _DuckDuckGoParser, load_skill, skill_registry, web_search
+from app.game_agent.tools import (
+    AGENT_TOOLS,
+    _DuckDuckGoParser,
+    read_skill_reference,
+    skill,
+    skill_registry,
+    web_search,
+)
 from app.game_agent.tracing import create_tool_call_wrapper, truncate_tool_payload
 from app.session_store import SessionStore
 
@@ -91,7 +104,26 @@ def test_deepseek_style_context_defaults(monkeypatch):
     assert configured.summary_tokens == 8192
 
 
-def test_image_is_part_of_current_multimodal_user_message():
+def test_legacy_game_summary_migrates_to_context_summary():
+    summary = context_summary_from_state({
+        "running_summary": {
+            "active_goal": "帮助用户规划下一步",
+            "resolved_games": ["艾尔登法环"],
+            "resolved_entities": ["摩恩城"],
+            "user_preferences": ["不要剧透"],
+            "confirmed_facts": ["用户位于啜泣半岛"],
+            "important_tool_results": ["攻略建议先完成送信任务"],
+            "unresolved_questions": ["是否已经见过伊蕾娜"],
+            "attachment_refs": ["screen-1"],
+        }
+    })
+    assert summary.primary_request_and_intent == ["帮助用户规划下一步"]
+    assert "已识别游戏：艾尔登法环" in summary.critical_context
+    assert summary.pending_tasks == ["是否已经见过伊蕾娜"]
+    assert summary.referenced_artifacts == ["screen-1"]
+
+
+def test_persisted_user_message_contains_only_attachment_reference():
     request = ChatRequest(
         question="这是什么角色？",
         attachments=[AttachmentInput(
@@ -101,18 +133,95 @@ def test_image_is_part_of_current_multimodal_user_message():
             data_url="data:image/png;base64,QUJD",
         )],
     )
-    message = _user_message(request)
+    ref = AttachmentRef(
+        attachment_id="img-1",
+        name="role.png",
+        mime_type="image/png",
+        size=3,
+    )
+    message = _user_message(request, [ref])
     assert message.content[0] == {"type": "text", "text": "这是什么角色？"}
     assert "role.png" in message.content[1]["text"]
-    assert message.content[2]["type"] == "image_url"
-    assert message.content[2]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert "attachment://img-1" in message.content[1]["text"]
+    assert "base64" not in json.dumps(message.content)
 
 
-def test_model_sees_one_skill_loader_and_one_search_tool():
-    assert AGENT_TOOLS == [load_skill, web_search]
+def test_current_image_is_hydrated_only_in_ephemeral_model_context():
+    persisted = HumanMessage(content=[
+        {"type": "text", "text": "分析图片"},
+        {"type": "text", "text": "attachment://img-1"},
+    ], id="h1")
+
+    async def loader(attachment_id: str, session_id: str):
+        assert (attachment_id, session_id) == ("img-1", "session-1")
+        return {"mime_type": "image/png", "content": b"ABC"}
+
+    hydrated = asyncio.run(hydrate_current_images(
+        [persisted],
+        [{
+            "attachment_id": "img-1",
+            "name": "role.png",
+            "mime_type": "image/png",
+            "size": 3,
+        }],
+        session_id="session-1",
+        loader=loader,
+    ))
+    assert len(persisted.content) == 2
+    assert hydrated[0].content[-1]["type"] == "image_url"
+    assert hydrated[0].content[-1]["image_url"]["url"] == "data:image/png;base64,QUJD"
+
+
+def test_minio_attachment_store_wraps_blocking_client():
+    calls = []
+
+    class Response:
+        def read(self):
+            return b"ABC"
+
+        def close(self):
+            calls.append("close")
+
+        def release_conn(self):
+            calls.append("release")
+
+    class Client:
+        def bucket_exists(self, bucket):
+            calls.append(("exists", bucket))
+            return False
+
+        def make_bucket(self, bucket):
+            calls.append(("make", bucket))
+
+        def put_object(self, bucket, key, stream, size, content_type):
+            calls.append(("put", bucket, key, stream.read(), size, content_type))
+
+        def get_object(self, bucket, key):
+            calls.append(("get", bucket, key))
+            return Response()
+
+        def remove_object(self, bucket, key):
+            calls.append(("delete", bucket, key))
+
+    store = MinioAttachmentStore("127.0.0.1:9000", "key", "secret", "images")
+    store.client = Client()
+    asyncio.run(store.setup())
+    asyncio.run(store.put("sessions/a/img-1", b"ABC", "image/png"))
+    assert asyncio.run(store.get("sessions/a/img-1")) == b"ABC"
+    asyncio.run(store.delete_many(["sessions/a/img-1"]))
+    assert ("make", "images") in calls
+    assert ("put", "images", "sessions/a/img-1", b"ABC", 3, "image/png") in calls
+    assert ("delete", "images", "sessions/a/img-1") in calls
+
+
+def test_model_sees_skill_reference_and_search_tools():
+    assert AGENT_TOOLS == [skill, read_skill_reference, web_search]
     schema = web_search.args_schema.model_json_schema()
     assert set(schema["properties"]) == {"query", "depth"}
-    assert set(load_skill.args_schema.model_json_schema()["properties"]) == {"name", "resource"}
+    assert set(skill.args_schema.model_json_schema()["properties"]) == {"name"}
+    assert set(read_skill_reference.args_schema.model_json_schema()["properties"]) == {
+        "name", "path",
+    }
 
 
 def test_builtin_skills_follow_progressive_disclosure_contract():
@@ -128,11 +237,20 @@ def test_builtin_skills_follow_progressive_disclosure_contract():
     assert "图片落地规则" in reference.content
 
 
-def test_load_skill_returns_confirmation_without_persisting_instructions():
-    payload = json.loads(load_skill.invoke({"name": "game-news"}))
+def test_skill_tool_returns_full_body_in_tool_result():
+    payload = json.loads(skill.invoke({"name": "game-news"}))
     assert payload["status"] == "loaded"
     assert payload["output_items"][0]["type"] == "skill_load"
-    assert "# Game News" not in json.dumps(payload, ensure_ascii=False)
+    assert "# Game News" in payload["content"]
+
+
+def test_skill_reference_is_loaded_by_a_separate_tool():
+    payload = json.loads(read_skill_reference.invoke({
+        "name": "game-news",
+        "path": "references/source-policy.md",
+    }))
+    assert payload["resource"] == "references/source-policy.md"
+    assert payload["content"]
 
 
 def test_skill_registry_rejects_path_traversal():
@@ -154,26 +272,21 @@ def test_legacy_attachment_is_restored_from_checkpoint_image():
     assert restored[0]["attachments"][0]["data_url"] == "data:image/png;base64,QUJD"
 
 
-class RecordingImageService:
-    def __init__(self):
-        self.calls = 0
+def test_expired_image_and_text_enter_one_multimodal_compaction_call(monkeypatch):
+    image = "data:image/png;base64,QUJD"
+    captured_messages = []
 
-    async def summarize(self, image, source_message_id):
-        self.calls += 1
-        return VisualMemory(
-            source_message_id=source_message_id,
-            game="艾尔登法环",
-            key_facts=["角色装备界面"],
+    async def capture_summary(model, schema, messages, max_tokens=None):
+        captured_messages.extend(messages)
+        return ContextSummary(
+            key_concepts=["艾尔登法环"],
+            critical_context=["旧图片展示角色装备界面"],
         )
 
-
-def test_current_image_is_only_summarized_when_its_turn_expires():
-    image = "data:image/png;base64,QUJD"
-    service = RecordingImageService()
+    monkeypatch.setattr("app.game_agent.memory.invoke_validated_json", capture_summary)
     manager = ContextManager(
-        summary_model=None,
+        summary_model=object(),
         budget=budget(recent_tokens=1, summary_tokens=500),
-        image_service=service,
     )
     current = HumanMessage(content=[
         {"type": "text", "text": "分析图片"},
@@ -181,15 +294,33 @@ def test_current_image_is_only_summarized_when_its_turn_expires():
     ], id="current")
     unchanged = asyncio.run(manager.compact({"messages": [current]}, force=True))
     assert unchanged["compacted"] is False
-    assert service.calls == 0
+    assert captured_messages == []
 
     messages = [current, AIMessage(content="旧回答", id="a1"), HumanMessage(content="继续", id="h2")]
     compacted = asyncio.run(manager.compact({"messages": messages}, force=True))
     assert compacted["compacted"] is True
-    assert service.calls == 1
-    assert "image_artifacts" not in compacted
-    assert compacted["running_summary"]["visual_memories"][0]["source_message_id"] == "current"
-    assert image not in json.dumps(compacted["running_summary"], ensure_ascii=False)
+    multimodal = next(message for message in captured_messages if message.id == "current")
+    assert multimodal.content[0] == {"type": "text", "text": "分析图片"}
+    assert multimodal.content[1]["image_url"]["url"] == image
+    assert compacted["context_summary"]["key_concepts"] == ["艾尔登法环"]
+    assert image not in json.dumps(compacted["context_summary"], ensure_ascii=False)
+
+
+def test_image_data_is_not_given_a_fixed_local_token_price(monkeypatch):
+    monkeypatch.setattr("app.game_agent.memory.count_tokens_approximately", lambda messages: 7)
+    first = HumanMessage(content=[
+        {"type": "text", "text": "分析图片"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+    ])
+    second = first.model_copy(update={
+        "content": [
+            *first.content,
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,REVG"}},
+        ]
+    })
+    from app.game_agent.memory import message_tokens
+    assert message_tokens([first]) == 7
+    assert message_tokens([second]) == 7
 
 
 def test_token_ledger_only_estimates_new_messages(monkeypatch):
@@ -216,12 +347,13 @@ def test_token_ledger_only_estimates_new_messages(monkeypatch):
     assert calls[-1] == "h1"
 
 
-def test_token_ledger_uses_api_usage_to_calibrate_overhead():
+def test_provider_usage_is_recorded_without_changing_runtime_estimate():
     ledger = sync_token_ledger([HumanMessage(content="测试", id="h1")])
     previous = ledger.protocol_overhead_tokens
-    calibrated = calibrate_token_ledger(ledger.model_dump(), 100, 500)
-    assert calibrated.last_actual_prompt_tokens == 500
-    assert calibrated.protocol_overhead_tokens == round(previous * 0.7 + 400 * 0.3)
+    observed = record_token_observation(ledger.model_dump(), 100, 500)
+    assert observed.last_estimated_prompt_tokens == 100
+    assert observed.last_actual_prompt_tokens == 500
+    assert observed.protocol_overhead_tokens == previous
 
 
 def test_harness_tracer_groups_model_and_tools_into_steps():
@@ -306,6 +438,7 @@ def test_compaction_records_lifecycle_and_convergence():
     )
     update = asyncio.run(manager.compact({"messages": messages}, emit=events.append))
     assert [event["event_type"] for event in events] == [
+        "context/pressure",
         "compaction/start",
         "compaction/summary",
         "compaction/end",
@@ -317,10 +450,25 @@ def test_compaction_records_lifecycle_and_convergence():
     assert metrics["retained_message_ids"] == ["h2"]
 
 
+def test_context_pressure_is_logged_even_when_compaction_is_not_needed():
+    events = []
+    manager = ContextManager(
+        summary_model=None,
+        budget=budget(context_window_tokens=10000, trigger_ratio=0.8),
+    )
+    update = asyncio.run(manager.compact({
+        "messages": [HumanMessage(content="short", id="h1")],
+    }, emit=events.append))
+    assert update["compacted"] is False
+    assert [event["event_type"] for event in events] == ["context/pressure"]
+    assert events[0]["source"] == "local_estimate"
+    assert events[0]["will_compact"] is False
+
+
 def test_summary_timeout_falls_back_without_blocking(monkeypatch):
     async def slow_summary(*args, **kwargs):
         await asyncio.sleep(0.1)
-        return RunningSummary(active_goal="should not finish")
+        return ContextSummary(current_work=["should not finish"])
 
     monkeypatch.setenv("GAME_SUMMARY_TIMEOUT_SECONDS", "0.01")
     monkeypatch.setattr("app.game_agent.memory.invoke_validated_json", slow_summary)
@@ -332,19 +480,19 @@ def test_summary_timeout_falls_back_without_blocking(monkeypatch):
     ]
     update = asyncio.run(manager.compact({"messages": messages}, force=True))
     assert update["compacted"] is True
-    assert "old context" in update["running_summary"]["narrative"]
+    assert "old context" in json.dumps(update["context_summary"]["critical_context"])
 
 
 def test_deterministic_summary_reducer_honors_budget():
     manager = ContextManager(summary_model=None, budget=budget(summary_tokens=50))
-    summary = RunningSummary(
-        active_goal="x" * 100,
-        confirmed_facts=["fact" * 40 for _ in range(20)],
+    summary = ContextSummary(
+        primary_request_and_intent=["x" * 100],
+        critical_context=["fact" * 40 for _ in range(20)],
         important_tool_results=["result" * 50 for _ in range(20)],
-        narrative="n" * 5000,
+        current_work=["n" * 500 for _ in range(10)],
     )
     reduced = manager._deterministic_reduce(summary)
-    minimum_schema_tokens = manager._summary_tokens(RunningSummary())
+    minimum_schema_tokens = manager._summary_tokens(ContextSummary())
     assert manager._summary_tokens(reduced) <= max(50, minimum_schema_tokens)
 
 
@@ -433,17 +581,6 @@ def test_tool_node_reports_a_readable_timeout_error():
     assert message.artifact["harness_trace"]["status"] == "error"
 
 
-def test_force_finish_closes_every_pending_tool_call():
-    pending = AIMessage(content="", tool_calls=[
-        {"id": "call-a", "name": "web_search", "args": {"query": "A", "depth": "quick"}},
-        {"id": "call-b", "name": "web_search", "args": {"query": "B", "depth": "research"}},
-    ])
-    messages, traces = close_tool_calls_for_force_finish(pending)
-    assert [message.tool_call_id for message in messages] == ["call-a", "call-b"]
-    assert [trace.name for trace in traces] == ["web_search", "web_search"]
-    assert all(trace.status == "error" for trace in traces)
-
-
 def test_text_attachment_is_extracted_without_persisting_raw_data():
     import base64
 
@@ -451,7 +588,7 @@ def test_text_attachment_is_extracted_without_persisting_raw_data():
     data_url = "data:text/plain;base64," + base64.b64encode(raw).decode()
     assert decode_data_url(data_url, len(raw)) == raw
     assert extract_file_text("notes.txt", "text/plain", raw) == raw.decode()
-    artifact = asyncio.run(AttachmentArtifactService(None).analyze({
+    artifact = asyncio.run(AttachmentArtifactService().analyze({
         "name": "notes.txt", "mime_type": "text/plain", "size": len(raw), "data_url": data_url,
     }))
     assert artifact["summary"]["extracted_text"] == raw.decode()
