@@ -6,6 +6,7 @@ from datetime import datetime
 from urllib.parse import quote
 from uuid import uuid4
 
+from langchain_core.messages import messages_from_dict
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -44,6 +45,15 @@ class SessionStore:
                         title TEXT NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL,
                         updated_at TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
+                await cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_state (
+                        session_id TEXT PRIMARY KEY REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+                        state JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
@@ -345,6 +355,43 @@ class SessionStore:
         if deleted and self.attachment_store is not None and object_keys:
             await self.attachment_store.delete_many(object_keys)
         return deleted
+
+    async def load_state(self, session_id: str) -> dict:
+        """读取会话的 Agent 执行状态，并把消息还原为 LangChain 消息对象。"""
+        async with await self._connect() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT state FROM agent_state WHERE session_id = %s",
+                    (session_id,),
+                )
+                row = await cursor.fetchone()
+        if not row:
+            return {}
+        data = row["state"]
+        if isinstance(data, str):
+            data = json.loads(data)
+        data = dict(data)
+        data["messages"] = list(messages_from_dict(data.get("messages", [])))
+        return data
+
+    async def save_state(self, session_id: str, state: dict) -> None:
+        """持久化会话的 Agent 执行状态；消息序列化为字典，临时字段不落库。"""
+        data = dict(state)
+        data["messages"] = [m.model_dump() for m in data.get("messages", [])]
+        data.pop("current_attachments", None)
+        now = datetime.now().astimezone()
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+        async with await self._connect() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    INSERT INTO agent_state(session_id, state, updated_at)
+                    VALUES (%s, %s::jsonb, %s)
+                    ON CONFLICT(session_id) DO UPDATE
+                    SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at
+                    """,
+                    (session_id, payload, now),
+                )
 
     async def record_run(
         self,

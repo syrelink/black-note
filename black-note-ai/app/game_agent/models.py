@@ -1,17 +1,14 @@
 """GameRover 的共享数据协议。
 
-这里不执行业务逻辑，只定义 LangGraph State、接口请求响应、工具轨迹和各种
-结构化模型。集中定义可以避免 graph、memory、tools 之间使用不一致的字典。
+这里不执行业务逻辑，只定义接口请求响应、工具轨迹和结构化模型。
+已移除 LangGraph 的 State 定义：会话状态现在是普通 dict，由 SessionStore 持久化。
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, model_validator
-from typing_extensions import TypedDict
 
 
 class ContextSummary(BaseModel):
@@ -44,7 +41,6 @@ class TokenLedger(BaseModel):
 class ContextMetrics(BaseModel):
     """一次上下文预算检查的可观测指标，供 Harness 面板展示。"""
 
-    # 配置预算。
     context_window_tokens: int = 0
     trigger_ratio: float = 0.8
     trigger_tokens: int = 0
@@ -52,7 +48,6 @@ class ContextMetrics(BaseModel):
     recent_budget_tokens: int = 0
     summary_budget_tokens: int = 0
     tool_result_budget_tokens: int = 0
-    # 实际占用：Active 是近期原始消息，Summary 是被压缩的较早状态。
     active_message_tokens: int = 0
     summary_tokens: int = 0
     model_input_tokens: int = 0
@@ -82,62 +77,24 @@ class TurnTokenUsage(BaseModel):
 
 
 class ToolTrace(BaseModel):
-    """一次 Tool Call 的审计记录，不等同于传回模型的 ToolMessage。"""
+    """一次 Tool Call 的审计记录。"""
 
     name: str
     arguments: dict = Field(default_factory=dict)
     status: Literal["success", "error"]
     preview: str
     latency_ms: int
-    execute_ms: int = 0
-    post_process_ms: int = 0
-    timeout_seconds: float | None = None
     error_type: str | None = None
     truncated: bool = False
-    steps: list[dict] = Field(default_factory=list)
-    output_items: list[dict] = Field(default_factory=list)
 
 
 class AttachmentRef(BaseModel):
-    """LangGraph State 中保存的轻量图片引用，不包含原始二进制或 Base64。"""
+    """State 中保存的轻量图片引用，不包含原始二进制或 Base64。"""
 
     attachment_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(pattern=r"^image/")
     size: int = Field(ge=0, le=10 * 1024 * 1024)
-
-
-class HarnessState(TypedDict, total=False):
-    """LangGraph Checkpoint 中持久化的完整会话状态。
-
-    total=False 表示节点只需返回自己修改的字段；LangGraph Reducer 负责合并。
-    messages 使用 add_messages，因此新消息会追加，RemoveMessage 会按 ID 删除。
-    """
-
-    # 对话与压缩记忆。running_summary 仅用于读取旧 Checkpoint，新的压缩不再写入。
-    messages: Annotated[list[AnyMessage], add_messages]
-    context_summary: dict
-    running_summary: dict
-    # HumanMessage 只保存 attachment:// 引用；原图由 AttachmentStore 保存。
-    # current_attachments 只指向当前用户 Turn 的图片。
-    current_attachments: list[dict]
-    pending_attachments: list[dict]
-    attachment_artifacts: dict[str, dict]
-    # Harness 可观测数据和计数器。
-    tool_trace: list[dict]
-    # Skill 正文作为 ToolMessage 进入消息历史；这里只保存本轮加载审计记录。
-    skill_trace: list[dict]
-    context_metrics: dict
-    compaction_events: list[dict]
-    token_ledger: dict
-    turn_token_usage: dict
-    llm_calls: int
-    tool_rounds: int
-    turn_count: int
-    compaction_count: int
-    summary_version: int
-    compacted: bool
-    force_compaction: bool
 
 
 class AttachmentInput(BaseModel):
@@ -183,4 +140,5 @@ class ChatResponse(BaseModel):
 
 class SessionRenameRequest(BaseModel):
     """历史会话重命名接口的输入。"""
+
     title: str = Field(min_length=1, max_length=100)

@@ -1,26 +1,39 @@
+"""最小可用的网页搜索。
+
+只保留「网页检索」这一能力：直接调用 DuckDuckGo HTML 端点，返回标题、摘要
+与链接。原 query_rewriter / reranker / sufficiency 等 Agentic Search 管线已移除。
+"""
+
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
-from app.game_agent.search.models import SearchResult
 
-# 负责删除 HTML 标签和多余空格。
 def plain_text(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip()
 
 
-class DuckDuckGoParser(HTMLParser):
-    def __init__(self):
+@dataclass
+class SearchResult:
+    title: str
+    url: str
+    snippet: str
+    source_domain: str = ""
+
+
+class _DuckDuckGoParser(HTMLParser):
+    def __init__(self) -> None:
         super().__init__()
         self.results: list[dict] = []
         self._current: dict | None = None
         self._capture: str | None = None
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         classes = set((attributes.get("class") or "").split())
         if tag == "a" and "result__a" in classes:
@@ -29,7 +42,7 @@ class DuckDuckGoParser(HTMLParser):
         elif self._current is not None and "result__snippet" in classes:
             self._capture = "snippet"
 
-    def handle_endtag(self, tag: str):
+    def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self._capture == "title":
             self._capture = None
         elif self._current is not None and self._capture == "snippet" and tag in {"a", "div"}:
@@ -37,7 +50,7 @@ class DuckDuckGoParser(HTMLParser):
             self._current = None
             self._capture = None
 
-    def handle_data(self, data: str):
+    def handle_data(self, data: str) -> None:
         if self._current is not None and self._capture:
             self._current[self._capture] += data.strip() + " "
 
@@ -51,48 +64,25 @@ class DuckDuckGoParser(HTMLParser):
 class DuckDuckGoSearch:
     endpoint = "https://html.duckduckgo.com/html/"
 
-    def __init__(self, timeout_seconds: float = 6):
+    def __init__(self, timeout_seconds: float = 6) -> None:
         self.timeout_seconds = timeout_seconds
 
-    async def search(
-        self,
-        query: str,
-        limit: int = 5,
-        freshness_days: int | None = None,
-    ) -> list[SearchResult]:
+    async def search(self, query: str, limit: int = 5) -> list[SearchResult]:
         params = {"q": query}
-        time_filter = self._time_filter(freshness_days)
-        if time_filter:
-            params["df"] = time_filter
         async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
-            response = await client.get(self.endpoint, params=params, headers={"User-Agent": "Mozilla/5.0"})
+            response = await client.get(
+                self.endpoint, params=params, headers={"User-Agent": "Mozilla/5.0"}
+            )
             response.raise_for_status()
-        parser = DuckDuckGoParser()
+        parser = _DuckDuckGoParser()
         parser.feed(response.text)
         results = []
-        for rank, item in enumerate(parser.results[: max(1, min(limit, 10))], start=1):
+        for item in parser.results[: max(1, min(limit, 10))]:
             url = item["url"]
             results.append(SearchResult(
                 title=plain_text(item["title"]),
                 snippet=plain_text(item["snippet"]),
                 url=url,
-                query=query,
                 source_domain=urlparse(url).netloc.lower(),
-                rank=rank,
             ))
         return results
-
-    @staticmethod
-    def _time_filter(days: int | None) -> str | None:
-        if days is None:
-            return None
-        if days <= 1:
-            return "d"
-        if days <= 7:
-            return "w"
-        if days <= 31:
-            return "m"
-        return "y"
-
-
-_DuckDuckGoParser = DuckDuckGoParser

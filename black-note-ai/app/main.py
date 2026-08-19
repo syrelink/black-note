@@ -1,5 +1,6 @@
-"""Game_Rover single-agent Harness API."""
+"""Game_Rover 单 Agent Harness API（无 LangGraph）。"""
 
+import asyncio
 import json
 import logging
 import os
@@ -13,7 +14,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.game_agent import build_game_assistant
 from app.game_agent.attachments import decode_data_url, render_attachment_references
@@ -29,7 +29,6 @@ from app.game_agent.models import (
     ToolTrace,
     TurnTokenUsage,
 )
-from app.game_agent.tracing import HarnessTracer
 from app.session_store import SessionStore
 
 
@@ -40,33 +39,30 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://gamescope:gamescope@127.0.0.1:5433/gamescope?sslmode=disable",
 )
-os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     attachment_store = MinioAttachmentStore.from_env()
     session_store = SessionStore(DATABASE_URL, attachment_store=attachment_store)
-    async with AsyncPostgresSaver.from_conn_string(DATABASE_URL) as checkpointer:
-        await attachment_store.setup()
-        await checkpointer.setup()
-        await session_store.setup()
-        app.state.game_assistant = build_game_assistant(
-            checkpointer,
-            attachment_loader=session_store.get_attachment,
-        )
-        app.state.session_store = session_store
-        logging.info("Game_Rover 单 Agent Harness 已连接 PostgreSQL")
-        try:
-            yield
-        finally:
-            await session_store.close()
+    await attachment_store.setup()
+    await session_store.setup()
+    app.state.game_assistant = build_game_assistant(
+        session_store,
+        attachment_loader=session_store.get_attachment,
+    )
+    app.state.session_store = session_store
+    logging.info("Game_Rover 单 Agent Harness 已连接 PostgreSQL")
+    try:
+        yield
+    finally:
+        await session_store.close()
 
 
 app = FastAPI(
     title="Game_Rover Agent Harness API",
-    version="5.0.0",
-    description="带持久会话、Tool Loop、上下文预算和滚动摘要的游戏资讯 Agent",
+    version="6.0.0",
+    description="带持久会话、Tool Loop、上下文预算和滚动摘要的游戏资讯 Agent（无 LangGraph）",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -96,33 +92,24 @@ async def chat(req: ChatRequest) -> ChatResponse:
         _image_uploads(req),
     )
     attachment_refs = _attachment_refs(stored_attachments)
-    runtime = app.state.game_assistant
-    config = {
-        "configurable": {"thread_id": req.session_id},
-        "recursion_limit": 30,
-    }
-    result = await runtime.graph.ainvoke(
-        {
-            "messages": [_user_message(req, attachment_refs)],
-            "current_attachments": [item.model_dump() for item in attachment_refs],
-            "force_compaction": req.force_compaction,
-        },
-        config=config,
+    result = await app.state.game_assistant.run_turn(
+        req.session_id,
+        _user_message(req, attachment_refs),
+        [item.model_dump() for item in attachment_refs],
+        force_compaction=req.force_compaction,
     )
-    answer = result["messages"][-1].content
-    await app.state.session_store.record_assistant_message(req.session_id, answer)
+    await app.state.session_store.record_assistant_message(req.session_id, result["answer"])
     return _chat_response(result)
 
 
 def _chat_response(result: dict) -> ChatResponse:
-    answer = result["messages"][-1].content
     return ChatResponse(
-        answer=answer,
+        answer=result["answer"],
         tool_trace=[ToolTrace.model_validate(item) for item in result.get("tool_trace", [])],
         context_metrics=ContextMetrics.model_validate(result.get("context_metrics", {})),
-        token_usage=TurnTokenUsage.model_validate(result.get("turn_token_usage", {})),
-        context_summary=context_summary_from_state(result),
-        attachment_artifacts=list(result.get("attachment_artifacts", {}).values()),
+        token_usage=TurnTokenUsage.model_validate(result["token_usage"].model_dump()),
+        context_summary=result["context_summary"],
+        attachment_artifacts=result.get("attachment_artifacts", []),
         compacted=result.get("compacted", False),
     )
 
@@ -170,34 +157,6 @@ def _user_message(req: ChatRequest, refs: list[AttachmentRef]) -> HumanMessage:
     return HumanMessage(content=content, id=str(uuid4()))
 
 
-def _attachment_metadata(req: ChatRequest) -> list[dict]:
-    return [
-        {"name": item.name, "mime_type": item.mime_type, "size": item.size}
-        for item in req.attachments
-    ]
-
-
-def _restore_legacy_attachment_urls(transcript: list[dict], state_messages: list) -> list[dict]:
-    """用近期 Checkpoint 中的原图兼容仅保存了附件元数据的旧会话。"""
-    user_rows = [row for row in transcript if row.get("role") == "user"]
-    human_messages = [message for message in state_messages if message.type == "human"]
-    for row, message in zip(reversed(user_rows), reversed(human_messages)):
-        attachments = row.get("attachments") or []
-        missing = [item for item in attachments if not item.get("data_url")]
-        if not missing or not isinstance(message.content, list):
-            continue
-        images = []
-        for block in message.content:
-            if not isinstance(block, dict) or block.get("type") not in {"image_url", "input_image", "image"}:
-                continue
-            value = block.get("image_url") or block.get("url")
-            images.append(value.get("url") if isinstance(value, dict) else value)
-        for attachment, image in zip(missing, images):
-            if image:
-                attachment["data_url"] = image
-    return transcript
-
-
 @app.post("/ai/chat/stream")
 async def stream_chat(req: ChatRequest):
     async def events():
@@ -208,15 +167,11 @@ async def stream_chat(req: ChatRequest):
             _image_uploads(req),
         )
         attachment_refs = _attachment_refs(stored_attachments)
-        config = {
-            "configurable": {"thread_id": req.session_id},
-            "recursion_limit": 24,
-        }
-        started_at = datetime.now().astimezone()
         run_id = str(uuid4())
-        previous_snapshot = await runtime.graph.aget_state(config)
-        turn_number = int(previous_snapshot.values.get("turn_count", 0)) + 1 if previous_snapshot.values else 1
-        tracer = HarnessTracer(run_id, turn_number)
+        started_at = datetime.now().astimezone()
+        prev_state = await runtime.load_state(req.session_id)
+        turn_number = int(prev_state.get("turn_count", 0)) + 1
+        queue: asyncio.Queue = asyncio.Queue()
         event_sequence = 0
 
         async def persist_event(event: dict) -> None:
@@ -231,6 +186,22 @@ async def stream_chat(req: ChatRequest):
             except Exception:
                 logging.exception("Harness 事件持久化失败 run_id=%s", run_id)
 
+        async def emit(event: dict) -> None:
+            await queue.put(event)
+
+        async def runner() -> None:
+            try:
+                result = await runtime.run_turn(
+                    req.session_id,
+                    _user_message(req, attachment_refs),
+                    [item.model_dump() for item in attachment_refs],
+                    force_compaction=req.force_compaction,
+                    emit=emit,
+                )
+                await queue.put({"kind": "__done__", "result": result})
+            except Exception as exc:
+                await queue.put({"kind": "__error__", "error": exc})
+
         try:
             await app.state.session_store.start_run(
                 run_id=run_id,
@@ -238,98 +209,57 @@ async def stream_chat(req: ChatRequest):
                 turn_number=turn_number,
                 started_at=started_at,
             )
-            await persist_event({
-                "event_type": "turn/start",
-                "node": "START",
-                "turn_number": turn_number,
-            })
         except Exception:
             logging.exception("Harness Run 建档失败 run_id=%s", run_id)
-        yield _sse("graph", {
-            "run_id": run_id,
-            "turn_number": turn_number,
-            "nodes": [
-                "TurnContext", "ContextCompaction", "Agent", "ToolExecution", "END",
-            ],
-            "edges": [
-                "START → TurnContext", "TurnContext → ContextCompaction", "ContextCompaction → Agent",
-                "Agent → ToolExecution", "ToolExecution → ContextCompaction", "Agent → END",
-            ],
-        })
-        try:
-            graph_input = {
-                "messages": [_user_message(req, attachment_refs)],
-                "current_attachments": [item.model_dump() for item in attachment_refs],
-                "force_compaction": req.force_compaction,
-            }
-            async for mode, chunk in runtime.graph.astream(
-                graph_input,
-                config=config,
-                stream_mode=["updates", "custom"],
-            ):
-                if mode == "custom":
-                    if chunk.get("kind") == "model_token":
-                        yield _sse("token", chunk)
-                    for semantic_event in tracer.record_custom(chunk):
-                        await persist_event(semantic_event)
-                        yield _sse("trace", semantic_event)
-                    continue
-                for node, update in chunk.items():
-                    event_update = dict(update or {})
-                    node_event = tracer.record_node(node, event_update)
-                    await persist_event(node_event)
-                    yield _sse("node", node_event)
 
-            snapshot = await runtime.graph.aget_state(config)
-            result = dict(snapshot.values)
-            response = _chat_response(result)
-            await app.state.session_store.record_assistant_message(req.session_id, response.answer)
-            elapsed_ms = tracer.finish(response.token_usage)
-            persisted_metrics = response.context_metrics.model_dump()
-            persisted_metrics["turn_token_usage"] = response.token_usage.model_dump()
-            await persist_event({
-                "event_type": "turn/end",
-                "node": "END",
-                "turn_number": turn_number,
-                "elapsed_ms": elapsed_ms,
-            })
-            await app.state.session_store.finish_run(
-                run_id=run_id,
-                status="completed",
-                elapsed_ms=elapsed_ms,
-                compacted=response.compacted,
-                context_metrics=persisted_metrics,
-                tool_call_count=len(response.tool_trace),
-            )
-            yield _sse("final", {
-                **response.model_dump(),
-                "run_id": run_id,
-                "turn_number": turn_number,
-                "elapsed_ms": elapsed_ms,
-                "final_edge": f"{tracer.previous_node or 'START'} → END",
-            })
-        except Exception as exc:
-            logging.exception("Game_Rover 流式执行失败")
-            elapsed_ms = int((datetime.now().astimezone() - started_at).total_seconds() * 1000)
-            await persist_event({
-                "event_type": "turn/error",
-                "node": tracer.previous_node,
-                "turn_number": turn_number,
-                "elapsed_ms": elapsed_ms,
-                "error_type": type(exc).__name__,
-                "error_message": str(exc)[:1000],
-            })
-            try:
+        task = asyncio.create_task(runner())
+        while True:
+            event = await queue.get()
+            kind = event.get("kind")
+            if kind == "__done__":
+                result = event["result"]
+                await app.state.session_store.record_assistant_message(req.session_id, result["answer"])
+                elapsed_ms = result.get("elapsed_ms", 0)
+                await app.state.session_store.finish_run(
+                    run_id=run_id,
+                    status="completed",
+                    elapsed_ms=elapsed_ms,
+                    compacted=result.get("compacted", False),
+                    context_metrics=result.get("context_metrics", {}),
+                    tool_call_count=len(result.get("tool_trace", [])),
+                )
+                yield _sse("final", {
+                    "answer": result["answer"],
+                    "tool_trace": result["tool_trace"],
+                    "context_metrics": result["context_metrics"],
+                    "token_usage": result["token_usage"].model_dump(),
+                    "context_summary": result["context_summary"].model_dump(),
+                    "attachment_artifacts": result["attachment_artifacts"],
+                    "compacted": result["compacted"],
+                    "run_id": run_id,
+                    "turn_number": turn_number,
+                    "elapsed_ms": elapsed_ms,
+                })
+                break
+            if kind == "__error__":
+                exc = event["error"]
+                logging.exception("Game_Rover 流式执行失败")
                 await app.state.session_store.finish_run(
                     run_id=run_id,
                     status="failed",
-                    elapsed_ms=elapsed_ms,
+                    elapsed_ms=0,
                     error_type=type(exc).__name__,
                     error_message=str(exc)[:1000],
                 )
-            except Exception:
-                logging.exception("Harness 失败 Run 闭合失败 run_id=%s", run_id)
-            yield _sse("error", {"detail": str(exc)})
+                yield _sse("error", {"detail": str(exc)})
+                break
+            if kind == "model_token":
+                yield _sse("token", event)
+            elif kind == "harness_event":
+                semantic = event["event"]
+                await persist_event(semantic)
+                yield _sse("trace", semantic)
+        await task
 
     return StreamingResponse(
         events(),
@@ -352,18 +282,15 @@ async def session_messages(session_id: str):
             for message in messages
             for attachment in (message.get("attachments") or [])
         ):
-            config = {"configurable": {"thread_id": session_id}}
-            snapshot = await app.state.game_assistant.graph.aget_state(config)
-            if snapshot.values:
-                messages = _restore_legacy_attachment_urls(messages, snapshot.values.get("messages", []))
+            state = await app.state.session_store.load_state(session_id)
+            messages = _restore_legacy_attachment_urls(messages, state.get("messages", []))
         return {"session_id": session_id, "messages": messages}
 
-    config = {"configurable": {"thread_id": session_id}}
-    snapshot = await app.state.game_assistant.graph.aget_state(config)
-    if not snapshot.values:
+    state = await app.state.session_store.load_state(session_id)
+    if not state.get("messages"):
         raise HTTPException(status_code=404, detail="session not found")
     fallback = []
-    for message in snapshot.values.get("messages", []):
+    for message in state["messages"]:
         if message.type == "human":
             fallback.append({"role": "user", "content": message.content})
         elif message.type == "ai" and message.content:
@@ -406,16 +333,14 @@ async def delete_session(session_id: str):
     deleted = await app.state.session_store.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="session not found")
-    await app.state.game_assistant.graph.checkpointer.adelete_thread(session_id)
 
 
 @app.get("/ai/sessions/{session_id}/state")
 async def inspect_session(session_id: str):
-    config = {"configurable": {"thread_id": session_id}}
-    snapshot = await app.state.game_assistant.graph.aget_state(config)
-    if not snapshot.values:
+    state = await app.state.session_store.load_state(session_id)
+    if not state.get("messages"):
         raise HTTPException(status_code=404, detail="session not found")
-    state = dict(snapshot.values)
+    state = dict(state)
     state["messages"] = [
         {
             "id": message.id,
@@ -438,3 +363,24 @@ async def health():
         "tools": ["skill", "read_skill_reference", "web_search"],
         "skills": [item.name for item in app.state.game_assistant.skill_registry.catalog()],
     }
+
+
+def _restore_legacy_attachment_urls(transcript: list[dict], state_messages: list) -> list[dict]:
+    """用近期 State 中的原图兼容仅保存了附件元数据的旧会话。"""
+    user_rows = [row for row in transcript if row.get("role") == "user"]
+    human_messages = [message for message in state_messages if message.type == "human"]
+    for row, message in zip(reversed(user_rows), reversed(human_messages)):
+        attachments = row.get("attachments") or []
+        missing = [item for item in attachments if not item.get("data_url")]
+        if not missing or not isinstance(message.content, list):
+            continue
+        images = []
+        for block in message.content:
+            if not isinstance(block, dict) or block.get("type") not in {"image_url", "input_image", "image"}:
+                continue
+            value = block.get("image_url") or block.get("url")
+            images.append(value.get("url") if isinstance(value, dict) else value)
+        for attachment, image in zip(missing, images):
+            if image:
+                attachment["data_url"] = image
+    return transcript

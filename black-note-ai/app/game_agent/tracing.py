@@ -1,22 +1,19 @@
-"""Harness 级可观测性。
+"""Harness 级可观测性（精简版）。
 
-ToolNode 负责执行工具；本模块只记录图节点、工具调用和本轮 Token 消耗，
-避免把执行、状态更新与前端轨迹混在同一个 Runtime 类中。
+工具执行已移入 agent.py，本模块只保留：工具结果裁剪、以及一次请求的
+节点/步骤轨迹与 Token 指标记录。不再依赖 LangGraph。
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import ToolMessage
-from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from app.game_agent.models import ToolTrace, TurnTokenUsage
+from app.game_agent.models import TurnTokenUsage
 
 
 def truncate_tool_payload(content: str, token_budget: int) -> tuple[str, bool]:
@@ -37,203 +34,17 @@ def truncate_tool_payload(content: str, token_budget: int) -> tuple[str, bool]:
                     return compact, True
             return json.dumps({"error": "tool_error"}, ensure_ascii=False), True
 
-        output_items = payload.get("output_items", [])
-        search_message = next(
-            (item for item in output_items if item.get("type") == "search_message"),
-            None,
-        )
-        if search_message is not None:
-            payload.pop("trace", None)
-            for evidence in search_message.get("evidence", []):
-                evidence["snippet"] = evidence.get("snippet", "")[:320]
-                evidence["relevant_passages"] = [
-                    passage[:500]
-                    for passage in evidence.get("relevant_passages", [])[:2]
-                ]
+        results = payload.get("results", [])
+        if isinstance(results, list):
+            payload["results"] = results[:3]
             compact = json.dumps(payload, ensure_ascii=False)
-            while len(compact) > rough_limit and len(search_message.get("evidence", [])) > 1:
-                search_message["evidence"].pop()
-                compact = json.dumps(payload, ensure_ascii=False)
-            if len(compact) > rough_limit:
-                search_message["evidence"] = []
-                search_message["missing_information"] = [
-                    "搜索证据超过 Tool Result 预算，详细步骤已保留在 Harness Trace。"
-                ]
-                compact = json.dumps(payload, ensure_ascii=False)
-            if len(compact) > rough_limit:
-                compact = '{"error":"budget","output_items":[]}'
-            return compact, True
+            if len(compact) <= rough_limit:
+                return compact, True
     except (json.JSONDecodeError, AttributeError, TypeError):
         pass
 
     suffix = "\n[truncated]"
     return content[: max(0, rough_limit - len(suffix))] + suffix, True
-
-
-def _message_content(message: ToolMessage) -> str:
-    if isinstance(message.content, str):
-        return message.content
-    return json.dumps(message.content, ensure_ascii=False, default=str)
-
-
-def _trace_from_result(
-    name: str,
-    arguments: dict,
-    content: str,
-    status: str,
-    latency_ms: int,
-    truncated: bool,
-    *,
-    execute_ms: int = 0,
-    post_process_ms: int = 0,
-    timeout_seconds: float | None = None,
-) -> ToolTrace:
-    steps: list[dict] = []
-    output_items: list[dict] = []
-    normalized_status = "error" if status == "error" else "success"
-    error_type = None
-    try:
-        parsed = json.loads(content)
-        if parsed.get("error"):
-            normalized_status = "error"
-            error_type = parsed.get("error_type", "tool_error")
-        output_items = parsed.get("output_items", [])
-        steps = parsed.get("trace", {}).get("pipeline", parsed.get("pipeline", []))
-        search_call = next(
-            (item for item in output_items if item.get("type") == "web_search_call"),
-            {},
-        )
-        if search_call.get("status") == "failed":
-            normalized_status = "error"
-    except (json.JSONDecodeError, AttributeError, TypeError):
-        pass
-    return ToolTrace(
-        name=name,
-        arguments=arguments,
-        status=normalized_status,
-        preview=content[:1200],
-        latency_ms=latency_ms,
-        execute_ms=execute_ms,
-        post_process_ms=post_process_ms,
-        timeout_seconds=timeout_seconds,
-        error_type=error_type,
-        truncated=truncated,
-        steps=steps,
-        output_items=output_items,
-    )
-
-
-def create_tool_call_wrapper(
-    *,
-    result_token_budget: int,
-    default_timeout_seconds: float,
-    tool_timeouts: dict[str, float] | None = None,
-):
-    """为官方 ToolNode 增加超时、结果预算和可观测元数据。"""
-    timeouts = tool_timeouts or {}
-
-    async def wrapper(
-        request: ToolCallRequest,
-        execute: Callable[[ToolCallRequest], Awaitable[ToolMessage]],
-    ) -> ToolMessage:
-        call = request.tool_call
-        name = call.get("name", "unknown")
-        arguments = call.get("args", {})
-        timeout_seconds = timeouts.get(name, default_timeout_seconds)
-        started = time.perf_counter()
-        request.runtime.stream_writer({
-            "kind": "harness_event",
-            "event": {
-                "event_type": "tool/call",
-                "component": "tool",
-                "tool_call_id": call.get("id", name),
-                "tool_name": name,
-                "arguments": arguments,
-                "timeout_seconds": timeout_seconds,
-                "status": "running",
-            },
-        })
-        try:
-            result = await asyncio.wait_for(execute(request), timeout=timeout_seconds)
-            if not isinstance(result, ToolMessage):
-                return result
-        except asyncio.TimeoutError:
-            result = ToolMessage(
-                content=json.dumps({
-                    "error": f"{name} 执行超过 {timeout_seconds:g} 秒，已被 Harness 取消。请根据已有信息继续回答。",
-                    "error_type": "tool_timeout",
-                    "tool": name,
-                    "timeout_seconds": timeout_seconds,
-                }, ensure_ascii=False),
-                tool_call_id=call.get("id", name),
-                name=name,
-                status="error",
-            )
-        except Exception as exc:
-            detail = str(exc).strip() or exc.__class__.__name__
-            result = ToolMessage(
-                content=json.dumps({
-                    "error": detail,
-                    "error_type": exc.__class__.__name__,
-                    "tool": name,
-                }, ensure_ascii=False),
-                tool_call_id=call.get("id", name),
-                name=name,
-                status="error",
-            )
-
-        executed = time.perf_counter()
-        original_content = _message_content(result)
-        content, truncated = truncate_tool_payload(original_content, result_token_budget)
-        finished = time.perf_counter()
-        execute_ms = int((executed - started) * 1000)
-        post_process_ms = int((finished - executed) * 1000)
-        latency_ms = int((finished - started) * 1000)
-        trace = _trace_from_result(
-            name,
-            arguments,
-            original_content,
-            getattr(result, "status", "success"),
-            latency_ms,
-            truncated,
-            execute_ms=execute_ms,
-            post_process_ms=post_process_ms,
-            timeout_seconds=timeout_seconds,
-        ).model_copy(update={"preview": content[:1200]})
-        artifact = dict(result.artifact) if isinstance(result.artifact, dict) else {}
-        artifact["harness_trace"] = trace.model_dump()
-        traced_result = result.model_copy(update={
-            "content": content,
-            "status": trace.status,
-            # artifact 会随 Checkpoint 保存，但不会作为 ToolMessage 正文发给模型。
-            "artifact": artifact,
-        })
-        request.runtime.stream_writer({
-            "kind": "harness_event",
-            "event": {
-                "event_type": "tool/result" if trace.status == "success" else "tool/error",
-                "component": "tool",
-                "tool_call_id": call.get("id", name),
-                "tool_name": name,
-                "status": trace.status,
-                "duration_ms": latency_ms,
-                "execute_ms": trace.execute_ms,
-                "post_process_ms": trace.post_process_ms,
-                "timeout_seconds": trace.timeout_seconds,
-                "error_type": trace.error_type,
-                "truncated": trace.truncated,
-            },
-        })
-        logging.info(
-            "Harness tool_call name=%s status=%s latency_ms=%s truncated=%s",
-            name,
-            trace.status,
-            latency_ms,
-            truncated,
-        )
-        return traced_result
-
-    return wrapper
 
 
 class HarnessTracer:
@@ -272,32 +83,13 @@ class HarnessTracer:
             event["detail"] = "已自动压缩较早轮次" if update.get("compacted") else "当前上下文仍在预算内"
             event["compacted"] = bool(update.get("compacted"))
             event["context_metrics"] = update.get("context_metrics", {})
-            event["compaction_events"] = update.get("compaction_events", [])
         elif node == "Agent":
-            messages = update.get("messages", [])
-            tool_calls = getattr(messages[-1], "tool_calls", []) if messages else []
-            event["detail"] = (
-                "请求工具：" + "、".join(call["name"] for call in tool_calls)
-                if tool_calls else "已生成最终回答"
-            )
-            event["tool_calls"] = tool_calls
+            event["detail"] = "已生成最终回答" if not update.get("tool_calls") else "请求工具"
+            event["tool_calls"] = update.get("tool_calls", [])
             event["model_metrics"] = dict(self.current_model_metrics)
         elif node == "ToolExecution":
-            traces = [
-                message.artifact.get("harness_trace")
-                for message in update.get("messages", [])
-                if isinstance(message, ToolMessage)
-                and isinstance(message.artifact, dict)
-                and message.artifact.get("harness_trace")
-            ]
-            names = list(dict.fromkeys(trace.get("name", "工具") for trace in traces))
-            event["label"] = "加载专业能力" if names and all(
-                name in {"skill", "read_skill_reference"} for name in names
-            ) else (
-                "执行 " + "、".join(names) if names else "执行工具"
-            )
-            event["detail"] = f"本批完成 {len(traces)} 个工具调用"
-            event["tool_trace"] = traces
+            event["detail"] = f"本批完成 {update.get('tool_count', 0)} 个工具调用"
+            event["tool_trace"] = update.get("tool_trace", [])
         else:
             event["detail"] = self.NODE_LABELS.get(node, node)
 
@@ -306,42 +98,13 @@ class HarnessTracer:
         self.node_started = time.perf_counter()
         logging.info(
             "Harness node run_id=%s turn=%s node=%s duration_ms=%s",
-            self.run_id,
-            self.turn_number,
-            node,
-            event["duration_ms"],
+            self.run_id, self.turn_number, node, event["duration_ms"],
         )
         return event
 
-    def observe_custom(self, event: dict) -> None:
-        if event.get("kind") == "tool_call":
-            trace = event.get("trace", {})
-            logging.info(
-                "Harness custom run_id=%s tool=%s status=%s",
-                self.run_id,
-                trace.get("name"),
-                trace.get("status"),
-            )
-
-    def _close_step(self, status: str = "completed") -> dict | None:
-        if self.step_started is None:
-            return None
-        event = {
-            "event_type": "step/end",
-            "component": "harness",
-            "step_number": self.step_number,
-            "status": status,
-            "duration_ms": int((time.perf_counter() - self.step_started) * 1000),
-            "elapsed_ms": int((time.perf_counter() - self.started) * 1000),
-        }
-        self.step_started = None
-        self.events.append(event)
-        return event
-
     def record_custom(self, event: dict) -> list[dict]:
-        """把模型、工具和压缩事件归入稳定的 Turn/Step 语义轨迹。"""
+        """把模型事件归入稳定的 Turn/Step 语义轨迹。"""
         if event.get("kind") != "harness_event" or not isinstance(event.get("event"), dict):
-            self.observe_custom(event)
             return []
         payload = dict(event["event"])
         emitted = []
@@ -384,17 +147,27 @@ class HarnessTracer:
                 emitted.append(closed)
         return emitted
 
+    def _close_step(self, status: str = "completed") -> dict | None:
+        if self.step_started is None:
+            return None
+        event = {
+            "event_type": "step/end",
+            "component": "harness",
+            "step_number": self.step_number,
+            "status": status,
+            "duration_ms": int((time.perf_counter() - self.step_started) * 1000),
+            "elapsed_ms": int((time.perf_counter() - self.started) * 1000),
+        }
+        self.step_started = None
+        self.events.append(event)
+        return event
+
     def finish(self, token_usage: TurnTokenUsage) -> int:
         elapsed_ms = int((time.perf_counter() - self.started) * 1000)
         logging.info(
-            "Harness complete run_id=%s turn=%s elapsed_ms=%s model_calls=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated_calls=%s",
-            self.run_id,
-            self.turn_number,
-            elapsed_ms,
-            token_usage.model_calls,
-            token_usage.input_tokens,
-            token_usage.output_tokens,
-            token_usage.total_tokens,
-            token_usage.estimated_calls,
+            "Harness complete run_id=%s turn=%s elapsed_ms=%s model_calls=%s "
+            "input_tokens=%s output_tokens=%s total_tokens=%s",
+            self.run_id, self.turn_number, elapsed_ms, token_usage.model_calls,
+            token_usage.input_tokens, token_usage.output_tokens, token_usage.total_tokens,
         )
         return elapsed_ms

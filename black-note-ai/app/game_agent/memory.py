@@ -1,7 +1,7 @@
 """有 Token 预算的滚动上下文管理器。
 
 核心策略是“近期原始消息 + 较早结构化摘要”：达到预算阈值时只压缩较早的
-完整对话轮次，保留近期消息原文，并通过 RemoveMessage 更新 LangGraph State。
+完整对话轮次，保留近期消息原文，并手动移除已摘要的历史消息。
 """
 
 from __future__ import annotations
@@ -15,13 +15,12 @@ from typing import Callable
 from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
 from app.game_agent.models import (
     ContextSummary,
     ContextMetrics,
-    HarnessState,
     TokenLedger,
 )
 from app.game_agent.prompts import COMPACTION_PROMPT, SUMMARY_REDUCE_PROMPT
@@ -243,7 +242,7 @@ def split_by_balanced_units(
     )
 
 
-def context_summary_from_state(state: HarnessState | dict) -> ContextSummary:
+def context_summary_from_state(state: dict) -> ContextSummary:
     """读取 ContextSummary，并兼容更早版本的 running_summary。"""
     current = state.get("context_summary")
     if current:
@@ -283,7 +282,7 @@ class ContextManager:
 
     async def compact(
         self,
-        state: HarnessState,
+        state: dict,
         force: bool = False,
         emit: Callable[[dict], None] | None = None,
         node: str = "ContextCompaction",
@@ -420,7 +419,7 @@ class ContextManager:
                     pruned_message_ids=pruned_ids,
                 )
                 return {
-                    "messages": pruned_replacements,
+                    "messages": working_messages,
                     "context_metrics": metrics.model_dump(),
                     "token_ledger": ledger_after_prune.model_dump(),
                     "compacted": True,
@@ -440,7 +439,7 @@ class ContextManager:
                 error="当前上下文没有可安全压缩的闭合消息区域",
             )
             return {
-                "messages": pruned_replacements,
+                "messages": working_messages,
                 "context_metrics": base_metrics.model_copy(update={
                     "converged": False,
                     "tokens_before_compaction": estimated_input_tokens,
@@ -463,8 +462,11 @@ class ContextManager:
         summary, fallback_used = await self._generate_summary(existing, expired)
         summary = await self._enforce_summary_budget(summary)
         next_summary_version = state.get("summary_version", 0) + 1
-        # LangGraph 的消息 Reducer 通过 RemoveMessage 真正移除已摘要的历史消息。
-        removals = [RemoveMessage(id=message.id) for message in expired if message.id]
+        # 手动移除已摘要的历史消息（不再依赖 LangGraph 的消息 Reducer）。
+        kept_messages = [
+            message for index, message in enumerate(working_messages)
+            if _message_key(message, index) not in expired_keys
+        ]
         summary_tokens = self._summary_tokens(summary)
         recent_keys = {
             _message_key(message, index) for index, message in enumerate(recent)
@@ -534,7 +536,7 @@ class ContextManager:
             retained_message_ids=retained_ids,
         )
         update = {
-            "messages": [*pruned_replacements, *removals],
+            "messages": kept_messages,
             "context_summary": summary.model_dump(),
             "running_summary": {},
             "context_metrics": metrics.model_dump(),
@@ -549,7 +551,7 @@ class ContextManager:
 
     def build_model_context(
         self,
-        state: HarnessState,
+        state: dict,
         system_prompt: str,
         extra_system_messages: list[SystemMessage] | None = None,
     ) -> list[AnyMessage]:
