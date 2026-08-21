@@ -42,9 +42,9 @@
     ::-webkit-scrollbar-thumb { border-radius: 8px; background: #45464c; }
     ::-webkit-scrollbar-track { background: transparent; }
 
-    .app { display: grid; grid-template-columns: 238px minmax(520px, 1fr) 372px; width: 100%; height: 100%; min-height: 0; transition: grid-template-columns .22s ease; }
-    .app.drawer-closed { grid-template-columns: 0 minmax(520px, 1fr) 372px; }
-    .history, .trace, .chat { min-width: 0; min-height: 0; }
+    .app { display: grid; grid-template-columns: 238px minmax(520px, 1fr); width: 100%; height: 100%; min-height: 0; transition: grid-template-columns .22s ease; }
+    .app.drawer-closed { grid-template-columns: 0 minmax(520px, 1fr); }
+    .history, .chat { min-width: 0; min-height: 0; }
     .history { display: flex; overflow: hidden; flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar); opacity: 1; transform: translateX(0); transition: opacity .18s, transform .22s; }
     .drawer-closed .history { border-right: 0; opacity: 0; pointer-events: none; transform: translateX(-100%); }
     .history-head { padding: 18px 13px 10px; }
@@ -76,7 +76,7 @@
 
     .chat { display: flex; flex-direction: column; background: var(--bg); }
     .topbar { display: flex; height: var(--header-height); min-height: var(--header-height); flex: 0 0 var(--header-height); align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); }
-    .chat.welcome-mode .topbar { position: absolute; z-index: 3; top: 0; right: 372px; left: 238px; border-bottom: 0; background: transparent; pointer-events: none; }
+    .chat.welcome-mode .topbar { position: absolute; z-index: 3; top: 0; right: 0; left: 238px; border-bottom: 0; background: transparent; pointer-events: none; }
     .drawer-closed .chat.welcome-mode .topbar { left: 0; }
     .chat.welcome-mode .topbar-left { visibility: hidden; }
     .chat.welcome-mode .topbar-actions { margin-left: auto; pointer-events: auto; }
@@ -165,83 +165,6 @@
     .send:disabled { cursor: not-allowed; opacity: .4; }
     .hint { margin-top: 7px; color: #767983; font-size: 11px; text-align: center; }
 
-    .trace { position: relative; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--sidebar); }
-    .trace-head { height: var(--header-height); min-height: var(--header-height); flex: 0 0 var(--header-height); overflow: hidden; padding: 12px 17px; border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 650; }
-    .trace-subtitle { margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 400; }
-    .trace-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
-    .empty-trace { margin-top: 20px; padding: 20px; color: var(--muted); font-size: 13px; line-height: 1.7; text-align: center; }
-    .turn-trace { margin-bottom: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: rgba(127,127,127,.035); }
-    .turn-summary { display: flex; min-height: 52px; align-items: center; gap: 8px; padding: 11px 12px; }
-    .turn-summary::after { margin-left: 2px; color: var(--muted); content: "⌄"; transition: transform .18s; }
-    .turn-trace[open] > .turn-summary::after { transform: rotate(180deg); }
-    .turn-title { min-width: 0; flex: 1; font-size: 12px; font-weight: 750; }
-    .turn-meta { color: var(--muted); font-size: 9px; white-space: nowrap; }
-    .turn-body { padding: 0 10px 10px; }
-    .turn-body > :last-child { margin-bottom: 0; }
-    .graph-card, .metric-card, .tool-card, .json-card { margin-bottom: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: #222327; }
-    .graph-card { padding: 2px 2px 0; border: 0; border-radius: 0; background: transparent; }
-    details.metric-card, details.tool-card, details.json-card { padding: 0; }
-    details > summary { list-style: none; cursor: pointer; }
-    details > summary::-webkit-details-marker { display: none; }
-    details.metric-card > .card-head, details.tool-card > .card-head, details.json-card > .card-head { margin: 0; padding: 12px; }
-    details.metric-card > .card-head::after, details.tool-card > .card-head::after, details.json-card > .card-head::after { margin-left: auto; color: var(--muted); content: "⌄"; transition: transform .18s; }
-    details[open] > .card-head::after { transform: rotate(180deg); }
-    details.metric-card > p, details.tool-card > p, details.json-card > p { padding: 0 12px 12px; }
-    .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 12px; font-weight: 700; }
-    .badge { padding: 2px 7px; border-radius: 99px; color: #aebaff; background: var(--blue-soft); font-size: 10px; }
-    .graph-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-    .graph-node { padding: 5px 7px; border: 1px solid #3e4046; border-radius: 7px; color: #92959e; background: #292a2f; font-size: 10px; transition: .2s; }
-    .graph-node.active { border-color: #7388f2; color: #e6eaff; box-shadow: 0 0 0 2px rgba(77,107,254,.12); }
-    .graph-node.done { border-color: #397d6b; color: #9be1cc; }
-    .graph-arrow { color: #5f626b; font-size: 10px; }
-    .graph-edges { margin-top: 10px; padding: 8px; border-radius: 7px; color: #7f828c; background: #1d1e22; font: 9px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
-    .timeline { margin-top: 13px; padding-left: 8px; }
-    .run-step { position: relative; padding: 0 0 14px 18px; border-left: 1px solid #3c3e44; }
-    .run-step:last-child { border-left-color: transparent; }
-    .run-step::before { position: absolute; top: 1px; left: -5px; width: 9px; height: 9px; border: 2px solid #222327; border-radius: 50%; background: var(--green); content: ""; }
-    .step-title { display: flex; justify-content: space-between; gap: 8px; color: #d8dae0; font-size: 11px; font-weight: 650; }
-    .step-title::after { margin-left: auto; color: var(--muted); content: "⌄"; }
-    .run-step[open] > .step-title::after { transform: rotate(180deg); }
-    .step-content { padding-top: 2px; }
-    .step-edge, .step-detail { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
-    .tool-call { margin-top: 6px; border-radius: 7px; background: #2b2c31; color: #b9bcc5; font: 10px/1.5 "SFMono-Regular", Consolas, monospace; overflow: hidden; }
-    .tool-call > summary { padding: 7px; color: #cdd0d8; }
-    .tool-call > pre { max-height: 240px; margin: 0; overflow: auto; padding: 0 7px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .search-pipeline { margin: 0 7px 8px; padding: 7px 8px; border-left: 1px solid #596ed5; color: var(--muted); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    .search-output-items { display: grid; gap: 6px; margin: 0 7px 8px; }
-    .search-output-item { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: rgba(127,127,127,.055); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    .search-output-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); font-size: 10px; font-weight: 750; }
-    .search-output-detail { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
-    .search-stage { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 7px; padding: 4px 0; }
-    .search-stage-dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--green); }
-    .search-stage.partial .search-stage-dot { background: #e6ad45; }
-    .search-stage.error .search-stage-dot { background: var(--red); }
-    .search-stage-title { color: var(--text); font-size: 10px; font-weight: 650; }
-    .search-stage-detail { margin-top: 1px; color: var(--muted); font-size: 9px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .metric-card p, .tool-card p, .json-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .tool-card { max-height: 230px; overflow: auto; }
-    .state-action { flex: 0 0 auto; margin: 0 14px 14px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: #25262a; font-size: 12px; }
-    .state-action:hover { border-color: #596ed5; }
-
-    .state-overlay { position: absolute; z-index: 5; inset: 0; display: flex; min-height: 0; flex-direction: column; background: var(--sidebar); opacity: 0; pointer-events: none; transform: translateX(20px); transition: opacity .18s, transform .18s; }
-    .state-overlay.visible { opacity: 1; pointer-events: auto; transform: translateX(0); }
-    .state-overlay-head { display: flex; height: var(--header-height); min-height: var(--header-height); flex: 0 0 var(--header-height); align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); }
-    .state-back { padding: 7px 9px; border: 0; border-radius: 8px; color: var(--text); background: transparent; }
-    .state-back:hover { background: var(--surface); }
-    .state-tree { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
-    .state-branch { margin: 2px 0; }
-    .state-branch > summary { display: flex; align-items: center; gap: 7px; padding: 7px 5px; border-radius: 6px; font: 11px/1.4 "SFMono-Regular", Consolas, monospace; }
-    .state-branch > summary:hover { background: rgba(127,127,127,.07); }
-    .state-branch > summary::before { color: #8194f8; content: "▸"; transition: transform .15s; }
-    .state-branch[open] > summary::before { transform: rotate(90deg); }
-    .state-kind { margin-left: auto; color: var(--muted); font-size: 9px; }
-    .state-children { margin-left: 9px; padding: 0 0 4px 12px; border-left: 1px solid var(--line); }
-    .state-leaf { display: grid; grid-template-columns: minmax(70px, .65fr) 1.35fr; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--line); font: 10px/1.5 "SFMono-Regular", Consolas, monospace; }
-    .state-key { color: #899cf8; overflow-wrap: anywhere; }
-    .state-value { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .state-long > summary { padding: 7px 8px; color: #899cf8; font: 10px/1.4 "SFMono-Regular", Consolas, monospace; }
-    .state-long pre { max-height: 300px; margin: 0; overflow: auto; padding: 0 8px 8px; color: var(--muted); font: 10px/1.5 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-
     .modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; padding: 20px; place-items: center; background: rgba(0,0,0,.5); opacity: 0; pointer-events: none; transition: opacity .16s; }
     .modal-backdrop.visible { opacity: 1; pointer-events: auto; }
     .delete-dialog { width: min(440px, 100%); padding: 25px; border: 1px solid var(--line); border-radius: 20px; background: var(--bg); box-shadow: 0 24px 70px rgba(0,0,0,.34); transform: translateY(8px) scale(.98); transition: transform .16s; }
@@ -261,10 +184,7 @@
     :root[data-theme="light"] .session-row { color: #4f535b; }
     :root[data-theme="light"] .session-row:hover { background: #eceef2; }
     :root[data-theme="light"] .session-row.active { color: #202124; }
-    :root[data-theme="light"] .suggestion, :root[data-theme="light"] .metric-card, :root[data-theme="light"] .tool-card, :root[data-theme="light"] .json-card { background: #fafafa; }
-    :root[data-theme="light"] .graph-card { background: transparent; }
     :root[data-theme="light"] .suggestion { border-color: #e1e4ea; color: #575e6b; background: #fff; }
-    :root[data-theme="light"] .turn-trace { background: rgba(0,0,0,.015); }
     :root[data-theme="light"] .suggestion:hover { border-color: #aab6f6; color: #3449af; background: #f7f8ff; box-shadow: 0 5px 15px rgba(49,72,175,.08); }
     :root[data-theme="light"] .composer { border-color: transparent; background: #fff; box-shadow: 0 8px 28px rgba(32,33,36,.13), 0 0 0 1px rgba(32,33,36,.06); }
     :root[data-theme="light"] .send { color: #fff; background: #111; }
@@ -277,16 +197,9 @@
     :root[data-theme="light"] .markdown th { color: #24262a; background: #f1f3f6; }
     :root[data-theme="light"] .markdown tbody tr:nth-child(even) { background: #fafbfc; }
     :root[data-theme="light"] .copy-btn:hover, :root[data-theme="light"] .icon-btn:hover { background: #eceef2; }
-    :root[data-theme="light"] .jump-bottom, :root[data-theme="light"] .state-action { background: #fff; }
-    :root[data-theme="light"] .graph-node { color: #666b74; background: #f1f2f4; }
-    :root[data-theme="light"] .graph-node.active { color: #3449af; }
-    :root[data-theme="light"] .graph-node.done { color: #167a5e; }
-    :root[data-theme="light"] .graph-edges { color: #777b84; background: #f3f4f6; }
-    :root[data-theme="light"] .run-step::before { border-color: #fafafa; }
-    :root[data-theme="light"] .step-title { color: #34373d; }
-    :root[data-theme="light"] .tool-call { color: #555a63; background: #f0f1f4; }
+    :root[data-theme="light"] .jump-bottom { background: #fff; }
 
-    @media (max-width: 1120px) { .app { grid-template-columns: 220px minmax(480px, 1fr); } .app.drawer-closed { grid-template-columns: 0 minmax(480px, 1fr); } .trace { display: none; } .chat.welcome-mode .topbar { right: 0; left: 220px; } .drawer-closed .chat.welcome-mode .topbar { left: 0; } }
+    @media (max-width: 1120px) { .app { grid-template-columns: 220px minmax(480px, 1fr); } .app.drawer-closed { grid-template-columns: 0 minmax(480px, 1fr); } .chat.welcome-mode .topbar { right: 0; left: 220px; } .drawer-closed .chat.welcome-mode .topbar { left: 0; } }
     @media (max-width: 760px) { .app, .app.drawer-closed { display: block; } .history { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: 250px; height: 100vh; box-shadow: 12px 0 30px rgba(0,0,0,.25); } .drawer-closed .history { transform: translateX(-100%); } .chat { height: 100vh; } .chat.welcome-mode .topbar { right: 0; left: 0; } .suggestions { grid-template-columns: 1fr; } .composer { min-height: 64px; padding-left: 8px; } .send { width: 46px; height: 46px; } }
   </style>
 </head>
@@ -333,24 +246,12 @@
       </div>
     </section>
 
-    <aside class="trace">
-      <div class="trace-head">Harness 执行轨迹<div class="trace-subtitle">实时展示 LangGraph 节点、边、工具和耗时</div></div>
-      <div class="trace-body" id="traceBody"><div class="empty-trace">发送消息后，节点执行完成即会显示在这里，无需等待最终回答。</div></div>
-      <button class="state-action" id="inspectState" type="button">查看完整 State</button>
-      <section class="state-overlay" id="stateOverlay" aria-hidden="true">
-        <div class="state-overlay-head">
-          <button class="state-back" id="closeState" type="button">← 返回执行轨迹</button>
-          <span class="badge">State Tree</span>
-        </div>
-        <div class="state-tree" id="stateTree"></div>
-      </section>
-    </aside>
   </main>
 
   <div class="modal-backdrop" id="deleteModal" aria-hidden="true">
     <section class="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
       <h2 id="deleteModalTitle">删除对话？</h2>
-      <p>这将永久删除 <strong id="deleteSessionTitle"></strong> 及其聊天记录和 Harness 执行轨迹。</p>
+      <p>这将永久删除 <strong id="deleteSessionTitle"></strong> 及其聊天记录。</p>
       <div class="delete-modal-error" id="deleteModalError"></div>
       <div class="modal-actions">
         <button class="modal-button" id="cancelDelete" type="button">取消</button>
@@ -366,7 +267,6 @@
     const sendButton = document.querySelector('#sendButton');
     const sessionList = document.querySelector('#sessionList');
     const conversationTitle = document.querySelector('#conversationTitle');
-    const traceBody = document.querySelector('#traceBody');
     const attachmentInput = document.querySelector('#attachmentInput');
     const attachmentButton = document.querySelector('#attachmentButton');
     const attachmentTray = document.querySelector('#attachmentTray');
@@ -376,8 +276,6 @@
     const drawerToggle = document.querySelector('#drawerToggle');
     const drawerReopen = document.querySelector('#drawerReopen');
     const themeToggle = document.querySelector('#themeToggle');
-    const stateOverlay = document.querySelector('#stateOverlay');
-    const stateTree = document.querySelector('#stateTree');
     const deleteModal = document.querySelector('#deleteModal');
     const deleteSessionTitle = document.querySelector('#deleteSessionTitle');
     const deleteModalError = document.querySelector('#deleteModalError');
@@ -385,11 +283,6 @@
     let currentSessionId = localStorage.getItem('gamerover-session-id') || createSessionId();
     let busy = false;
     let sessions = [];
-    let graphNodes = new Map();
-    let timeline = null;
-    let currentTurnBody = null;
-    let currentTurnShell = null;
-    let currentBudgetCard = null;
     let pendingDeleteSession = null;
     let pendingAttachments = [];
     const savedDrawerState = localStorage.getItem('gamerover-drawer-closed');
@@ -412,10 +305,6 @@
       themeToggle.innerHTML = theme === 'dark' ? sunIcon : moonIcon;
       themeToggle.title = theme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
       themeToggle.setAttribute('aria-label', themeToggle.title);
-    }
-    function closeStateView() {
-      stateOverlay.classList.remove('visible');
-      stateOverlay.setAttribute('aria-hidden', 'true');
     }
     applyDrawerState();
     applyTheme();
@@ -507,7 +396,7 @@
       return html.join('');
     }
     function welcomeMarkup() {
-      return `<div class="welcome"><div class="welcome-symbol">✣</div><h1>我是 GameRover</h1><p>可以查询玩法、角色、任务与版本资讯，也会在右侧实时展示 Agent 经过的图节点、边和 Tool Calling。</p><div class="suggestions"><button class="suggestion" data-prompt="艾尔登法环的新手开荒路线怎么规划？">艾尔登法环开荒建议</button><button class="suggestion" data-prompt="绝区零最近有什么版本更新？">绝区零最新资讯</button><button class="suggestion" data-prompt="我在明日方舟卡关了，有点烦，陪我聊聊。">聊聊游戏挫败</button></div></div>`;
+      return `<div class="welcome"><div class="welcome-symbol">✣</div><h1>我是 GameRover</h1><p>可以查询玩法、角色、任务与版本资讯。</p><div class="suggestions"><button class="suggestion" data-prompt="艾尔登法环的新手开荒路线怎么规划？">艾尔登法环开荒建议</button><button class="suggestion" data-prompt="绝区零最近有什么版本更新？">绝区零最新资讯</button><button class="suggestion" data-prompt="我在明日方舟卡关了，有点烦，陪我聊聊。">聊聊游戏挫败</button></div></div>`;
     }
     function showWelcome() { document.querySelector('.chat').classList.add('welcome-mode'); messages.innerHTML = welcomeMarkup(); bindSuggestions(); }
     function bindSuggestions() { document.querySelectorAll('[data-prompt]').forEach(button => button.addEventListener('click', () => send(button.dataset.prompt))); }
@@ -562,251 +451,7 @@
       }
       messages.append(row); scrollToBottom(true); return row;
     }
-    function makeCard(className, title, badge, body, open = className === 'metric-card') {
-      const box = document.createElement('details'); box.className = className; box.open = open;
-      const head = document.createElement('summary'); head.className = 'card-head';
-      const name = document.createElement('span'); name.textContent = title;
-      const tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = badge;
-      const content = document.createElement('p'); content.textContent = body;
-      head.append(name, tag); box.append(head, content); return box;
-    }
-    function renderStateValue(key, value, depth = 0) {
-      const isObject = value !== null && typeof value === 'object';
-      if (isObject) {
-        const branch = document.createElement('details'); branch.className = 'state-branch'; branch.open = depth === 0;
-        const summary = document.createElement('summary');
-        const label = document.createElement('span'); label.textContent = key;
-        const kind = document.createElement('span'); kind.className = 'state-kind'; kind.textContent = Array.isArray(value) ? `Array(${value.length})` : `Object(${Object.keys(value).length})`;
-        summary.append(label, kind);
-        const children = document.createElement('div'); children.className = 'state-children';
-        const entries = Array.isArray(value) ? value.map((item, index) => [String(index), item]) : Object.entries(value);
-        for (const [childKey, childValue] of entries) children.append(renderStateValue(childKey, childValue, depth + 1));
-        branch.append(summary, children); return branch;
-      }
-      const display = value === null ? 'null' : String(value);
-      if (display.length > 180 || display.includes('\n')) {
-        const long = document.createElement('details'); long.className = 'state-long';
-        const summary = document.createElement('summary'); summary.textContent = `${key} · ${display.length} chars`;
-        const content = document.createElement('pre'); content.textContent = display;
-        long.append(summary, content); return long;
-      }
-      const leaf = document.createElement('div'); leaf.className = 'state-leaf';
-      const label = document.createElement('span'); label.className = 'state-key'; label.textContent = key;
-      const content = document.createElement('span'); content.className = 'state-value'; content.textContent = display;
-      leaf.append(label, content); return leaf;
-    }
-    function showStateView(data) {
-      stateTree.replaceChildren(renderStateValue('HarnessState', data));
-      stateOverlay.classList.add('visible');
-      stateOverlay.setAttribute('aria-hidden', 'false');
-    }
-    function createTurnShell(turnNumber, status, open, meta = '') {
-      const shell = document.createElement('details'); shell.className = 'turn-trace'; shell.open = open;
-      const summary = document.createElement('summary'); summary.className = 'turn-summary';
-      const title = document.createElement('span'); title.className = 'turn-title'; title.textContent = `第 ${turnNumber} 轮`;
-      const detail = document.createElement('span'); detail.className = 'turn-meta'; detail.textContent = meta;
-      const badge = document.createElement('span'); badge.className = 'badge turn-status'; badge.textContent = status;
-      const body = document.createElement('div'); body.className = 'turn-body';
-      summary.append(title, detail, badge); shell.append(summary, body);
-      return {shell, body, detail, badge};
-    }
-    function mountGraph(data, target, status = '运行中') {
-      const card = document.createElement('div'); card.className = 'graph-card';
-      const head = document.createElement('div'); head.className = 'card-head';
-      const title = document.createElement('span'); title.textContent = 'LangGraph'; head.append(title);
-      if (status) { const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = status; head.append(badge); }
-      const flow = document.createElement('div'); flow.className = 'graph-flow';
-      const nodeMap = new Map();
-      const visible = data.nodes || ['TurnContext', 'ContextCompaction', 'Agent', 'ToolExecution', 'END'];
-      visible.forEach((node, index) => { const item = document.createElement('span'); item.className = 'graph-node'; item.textContent = node; nodeMap.set(node, item); flow.append(item); if (index < visible.length - 1) { const arrow = document.createElement('span'); arrow.className = 'graph-arrow'; arrow.textContent = '→'; flow.append(arrow); } });
-      const edges = document.createElement('div'); edges.className = 'graph-edges'; edges.textContent = (data.edges || ['START → TurnContext', 'TurnContext → ContextCompaction', 'ContextCompaction → Agent', 'Agent → ToolExecution', 'ToolExecution → ContextCompaction', 'Agent → END']).join('\n');
-      const timelineElement = document.createElement('div'); timelineElement.className = 'timeline';
-      card.append(head, flow, edges, timelineElement); target.append(card);
-      return {nodeMap, timelineElement};
-    }
-    function startGraph(data) {
-      closeStateView();
-      traceBody.querySelector('.empty-trace')?.remove();
-      traceBody.querySelectorAll('.turn-trace').forEach(turn => { turn.open = false; });
-      const turn = createTurnShell(data.turn_number || traceBody.querySelectorAll('.turn-trace').length + 1, '运行中', true, '实时');
-      traceBody.prepend(turn.shell); currentTurnShell = turn;
-      currentTurnBody = turn.body;
-      currentBudgetCard = null;
-      const graph = mountGraph(data, currentTurnBody);
-      graphNodes = graph.nodeMap; timeline = graph.timelineElement;
-    }
 
-    function contextBudgetText(data, complete = false) {
-      const metrics = data.context_metrics || {};
-      const usage = data.token_usage || {};
-      const tokenSource = metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算';
-      const lines = [];
-      if (complete) lines.push(`总耗时 ${(data.elapsed_ms / 1000).toFixed(1)}s`);
-      if (usage.model_calls || complete) lines.push(`本轮 Token ${usage.total_tokens || 0}（输入 ${usage.input_tokens || 0} / 输出 ${usage.output_tokens || 0}）· ${usage.model_calls || 0} 次模型调用${usage.estimated_calls ? ` · ${usage.estimated_calls} 次估算` : ''}`);
-      if (metrics.model_input_tokens) lines.push(`最近模型输入 ${metrics.model_input_tokens} tokens · ${tokenSource}`);
-      lines.push(`窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)`);
-      lines.push(`近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)`);
-      lines.push(`Active ${metrics.active_message_tokens || 0}`);
-      lines.push(`Checkpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`);
-      if (complete) lines.push(`消息 ${metrics.messages_before || 0} → ${metrics.messages_after || 0}`);
-      return lines.join('\n');
-    }
-
-    function updateCurrentBudget(data, complete = false) {
-      if (!currentTurnBody) return;
-      const badge = data.compacted ? '自动压缩' : '预算内';
-      if (!currentBudgetCard) {
-        currentBudgetCard = makeCard('metric-card', 'Context Budget', badge, contextBudgetText(data, complete));
-        currentTurnBody.prepend(currentBudgetCard);
-        return;
-      }
-      currentBudgetCard.querySelector('.badge').textContent = badge;
-      currentBudgetCard.querySelector('p').textContent = contextBudgetText(data, complete);
-    }
-    function createNodeStep(data, open = true) {
-      const semanticLabels = {
-        'compaction/start': '开始整理历史上下文',
-        'compaction/summary': '生成滚动摘要',
-        'compaction/end': '验证压缩结果',
-        'model/end': '模型请求完成',
-        'model/error': '模型请求失败',
-        'tool/result': '工具执行完成',
-        'tool/error': '工具执行失败',
-        'turn/error': '本轮运行失败',
-      };
-      const semanticDetail = data.event_type === 'compaction/start'
-        ? `当前 ${data.tokens_before || 0} / 触发线 ${data.trigger_tokens || 0} tokens`
-        : data.event_type === 'compaction/summary'
-          ? `Checkpoint ${data.summary_tokens || 0} tokens · v${data.summary_version || 0}${data.fallback_used ? ' · 降级存档' : ''}`
-          : data.event_type === 'compaction/end'
-            ? `${data.tokens_after || 0} tokens · ${data.converged ? '已回到预算内' : '仍高于预算'}`
-            : data.event_type === 'model/end'
-              ? `首字 ${formatDuration(data.ttft_ms || 0)} · 生成 ${formatDuration(data.generation_ms || 0)} · ${data.output_tokens || 0} tokens${data.tokens_per_second ? ` · ${data.tokens_per_second} tok/s` : ''}`
-              : ['tool/result', 'tool/error'].includes(data.event_type)
-                ? `执行 ${formatDuration(data.execute_ms || data.duration_ms || 0)} · 后处理 ${formatDuration(data.post_process_ms || 0)}${data.error_type ? ` · ${data.error_type}` : ''}`
-                : data.error_message || '';
-      const step = document.createElement('details'); step.className = 'run-step'; step.open = true;
-      step.open = open;
-      const duration = data.duration_ms ?? data.elapsed_ms;
-      const stepPrefix = data.step_number ? `Step ${data.step_number} · ` : '';
-      const eventLabel = data.tool_name || data.label || semanticLabels[data.event_type] || data.event_type || data.node || '事件';
-      const summary = document.createElement('summary'); summary.className = 'step-title'; summary.innerHTML = `<span>${escapeHtml(stepPrefix + eventLabel)}</span><span>${duration == null ? '' : formatDuration(duration)}</span>`;
-      const content = document.createElement('div'); content.className = 'step-content';
-      if (data.edge) { const edge = document.createElement('div'); edge.className = 'step-edge'; edge.textContent = data.edge; content.append(edge); }
-      const model = data.model_metrics || {};
-      const modelDetail = model.duration_ms == null ? '' : `首字 ${formatDuration(model.ttft_ms || 0)} · 生成 ${formatDuration(model.generation_ms || 0)} · ${model.output_tokens || 0} tokens${model.tokens_per_second ? ` · ${model.tokens_per_second} tok/s` : ''}`;
-      const detail = document.createElement('div'); detail.className = 'step-detail'; detail.textContent = [data.detail || semanticDetail, modelDetail].filter(Boolean).join('\n'); content.append(detail);
-      for (const call of data.tool_calls || []) {
-        const details = document.createElement('details'); details.className = 'tool-call';
-        const title = document.createElement('summary'); title.textContent = `Tool Request · ${call.name}`;
-        const body = document.createElement('pre'); body.textContent = JSON.stringify(call.args, null, 2);
-        details.append(title, body); content.append(details);
-      }
-      for (const tool of data.tool_trace || []) {
-        const details = document.createElement('details'); details.className = 'tool-call';
-        const title = document.createElement('summary'); title.textContent = `${tool.name} · ${tool.status} · ${formatDuration(tool.latency_ms || 0)}`;
-        const body = document.createElement('pre'); body.textContent = `${JSON.stringify(tool.arguments, null, 2)}\n\n${tool.preview}`;
-        details.append(title);
-        if (tool.output_items?.length) details.append(renderSearchOutputItems(tool.output_items));
-        if (tool.steps?.length) details.append(renderSearchPipeline(tool.steps));
-        details.append(body); content.append(details);
-      }
-      step.append(summary, content);
-      return step;
-    }
-    function renderSearchOutputItems(items) {
-      const container = document.createElement('div'); container.className = 'search-output-items';
-      for (const item of items) {
-        const card = document.createElement('div'); card.className = 'search-output-item';
-        const head = document.createElement('div'); head.className = 'search-output-head';
-        const type = document.createElement('span'); type.textContent = item.type;
-        const badge = document.createElement('span');
-        if (item.type === 'skill_load') {
-          badge.textContent = item.status || 'loaded';
-          const detail = document.createElement('div'); detail.className = 'search-output-detail'; detail.textContent = item.resource ? `${item.skill} · ${item.resource}` : `${item.skill} · SKILL.md`;
-          head.append(type, badge); card.append(head, detail);
-        } else if (item.type === 'web_search_call') {
-          badge.textContent = `${item.mode} · ${item.status}`;
-          const actions = (item.actions || []).map(action => {
-            if (action.type === 'search') return `search: ${(action.queries || []).join(' / ')}`;
-            if (action.type === 'open_page') return `open_page: ${(action.urls || []).length} pages`;
-            return `find_in_page: ${action.pattern || ''}`;
-          });
-          const detail = document.createElement('div'); detail.className = 'search-output-detail'; detail.textContent = actions.join('\n');
-          head.append(type, badge); card.append(head, detail);
-        } else {
-          const evidence = item.evidence || [];
-          badge.textContent = item.sufficient ? '证据充足' : '证据不足';
-          const detail = document.createElement('div'); detail.className = 'search-output-detail'; detail.textContent = `${evidence.length} 条 Evidence${item.missing_information?.length ? ` · ${item.missing_information.join('；')}` : ''}`;
-          head.append(type, badge); card.append(head, detail);
-        }
-        container.append(card);
-      }
-      return container;
-    }
-    function renderSearchPipeline(steps) {
-      const pipeline = document.createElement('div'); pipeline.className = 'search-pipeline';
-      for (const step of steps) {
-        const row = document.createElement('div'); row.className = `search-stage ${step.status || 'success'}`;
-        const dot = document.createElement('span'); dot.className = 'search-stage-dot';
-        const text = document.createElement('div');
-        const title = document.createElement('div'); title.className = 'search-stage-title'; title.textContent = step.label || step.name;
-        const detail = document.createElement('div'); detail.className = 'search-stage-detail'; detail.textContent = step.detail || '';
-        text.append(title, detail); row.append(dot, text); pipeline.append(row);
-      }
-      return pipeline;
-    }
-    function appendNode(data) {
-      graphNodes.forEach(node => node.classList.remove('active'));
-      const graphNode = graphNodes.get(data.node); if (graphNode) graphNode.classList.add('active', 'done');
-      timeline?.append(createNodeStep(data)); traceBody.scrollTop = 0;
-      if (data.node === 'ContextCompaction' && data.context_metrics) updateCurrentBudget(data);
-    }
-    function appendTrace(data) {
-      const visibleEvents = new Set(['model/error', 'tool/error', 'turn/error']);
-      if (visibleEvents.has(data.event_type)) timeline?.append(createNodeStep(data));
-      traceBody.scrollTop = 0;
-    }
-    function appendFinalTrace(data) {
-      graphNodes.forEach(node => node.classList.remove('active'));
-      graphNodes.get('END')?.classList.add('done');
-      const metrics = data.context_metrics || {};
-      const usage = data.token_usage || {};
-      updateCurrentBudget({...data, context_metrics: metrics, token_usage: usage}, true);
-      const summary = data.context_summary || {};
-      if (Object.values(summary).some(value => Array.isArray(value) ? value.length : Boolean(value))) currentTurnBody?.append(makeCard('json-card', 'Context Summary', `${metrics.summary_tokens || 0} tokens`, JSON.stringify(summary, null, 2)));
-      if (currentTurnShell) {
-        currentTurnShell.badge.textContent = '完成';
-        currentTurnShell.detail.textContent = `${(data.elapsed_ms / 1000).toFixed(1)}s · ${data.tool_trace?.length || 0} 工具${data.compacted ? ' · 已压缩' : ''}`;
-      }
-      traceBody.scrollTop = 0;
-    }
-    function renderRunHistory(runs, checkpoint) {
-      traceBody.replaceChildren(); currentTurnBody = null; currentTurnShell = null; currentBudgetCard = null; graphNodes = new Map(); timeline = null;
-      if (!runs.length) {
-        if (!checkpoint) { traceBody.innerHTML = '<div class="empty-trace">这个会话还没有可恢复的执行轨迹。</div>'; return; }
-        const metrics = checkpoint.context_metrics || {};
-        traceBody.append(makeCard('metric-card', '最近 Checkpoint', checkpoint.compacted ? '已压缩' : '预算状态', `模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nCheckpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`));
-        return;
-      }
-      for (const run of runs) {
-        const meta = `${(run.elapsed_ms / 1000).toFixed(1)}s · ${run.tool_call_count || 0} 工具${run.compacted ? ' · 已压缩' : ''}`;
-        const statusLabel = run.status === 'completed' ? '完成' : run.status === 'failed' ? '失败' : run.status === 'interrupted' ? '已中断' : '运行中';
-        const turn = createTurnShell(run.turn_number, statusLabel, false, meta);
-        const graph = mountGraph({}, turn.body, '');
-        for (const event of run.events || []) {
-          if (['turn/start', 'turn/end', 'step/start', 'step/end', 'model/start', 'model/first_token', 'tool/call'].includes(event.event_type)) continue;
-          if (event.event_type !== 'node' && !['compaction/start', 'compaction/summary', 'compaction/end', 'model/error', 'tool/error', 'turn/error'].includes(event.event_type)) continue;
-          graph.nodeMap.get(event.node)?.classList.add('done');
-          graph.timelineElement.append(createNodeStep(event, false));
-        }
-        graph.nodeMap.get('END')?.classList.add('done');
-        const metrics = run.context_metrics || {};
-        const usage = metrics.turn_token_usage || {};
-        turn.body.append(makeCard('metric-card', 'Context Budget', run.compacted ? '自动压缩' : '预算内', `总耗时 ${(run.elapsed_ms / 1000).toFixed(1)}s\n本轮 Token ${usage.total_tokens || 0}（输入 ${usage.input_tokens || 0} / 输出 ${usage.output_tokens || 0}）· ${usage.model_calls || 0} 次模型调用\n最近模型输入 ${metrics.model_input_tokens || 0} tokens · ${metrics.model_input_source === 'api_usage' ? 'API 实测' : '本地估算'}\n窗口 ${metrics.context_window_tokens || 0} · 触发线 ${metrics.trigger_tokens || 0} (${Math.round((metrics.trigger_ratio || 0.8) * 100)}%)\n近期原文预算 ${metrics.recent_budget_tokens || 0} (${Math.round((metrics.retain_ratio || 0.16) * 100)}%)\nActive ${metrics.active_message_tokens || 0}\nCheckpoint ${metrics.summary_tokens || 0} / ${metrics.summary_budget_tokens || 0}`, false));
-        traceBody.append(turn.shell);
-      }
-    }
     function renderSessionList() {
       sessionList.replaceChildren();
       if (!sessions.length) { sessionList.innerHTML = '<div class="history-empty">完成第一轮对话后，会话会保存在这里。</div>'; return; }
@@ -857,7 +502,7 @@
       const response = await fetch(`/ai/sessions/${encodeURIComponent(session.session_id)}`, {method: 'DELETE'});
       if (!response.ok) { const data = await response.json(); deleteModalError.textContent = data.detail || '删除失败'; confirmDeleteButton.disabled = false; confirmDeleteButton.textContent = '删除'; return; }
       sessions = sessions.filter(item => item.session_id !== session.session_id);
-      if (session.session_id === currentSessionId) { currentSessionId = createSessionId(); saveCurrentSession(); conversationTitle.textContent = '新对话'; showWelcome(); currentTurnBody = null; currentTurnShell = null; traceBody.innerHTML = '<div class="empty-trace">新会话尚未执行。发送消息后将实时展示图执行过程。</div>'; }
+      if (session.session_id === currentSessionId) { currentSessionId = createSessionId(); saveCurrentSession(); conversationTitle.textContent = '新对话'; showWelcome(); }
       closeDeleteModal();
       renderSessionList();
     }
@@ -866,14 +511,11 @@
       const active = sessions.find(item => item.session_id === currentSessionId); if (active) await openSession(active.session_id, active.title); else { conversationTitle.textContent = '新对话'; showWelcome(); }
     }
     async function openSession(sessionId, title) {
-      if (busy) return; closeStateView(); currentSessionId = sessionId; saveCurrentSession(); conversationTitle.textContent = title || '历史对话'; renderSessionList(); messages.innerHTML = '<div class="empty-trace">正在加载对话…</div>'; traceBody.innerHTML = '<div class="empty-trace">正在恢复每轮执行轨迹…</div>';
+      if (busy) return; currentSessionId = sessionId; saveCurrentSession(); conversationTitle.textContent = title || '历史对话'; renderSessionList();
       if (window.matchMedia('(max-width: 760px)').matches) { drawerClosed = true; applyDrawerState(); }
       try {
-        const [historyResponse, stateResponse, runsResponse] = await Promise.all([fetch(`/ai/sessions/${encodeURIComponent(sessionId)}/messages`), fetch(`/ai/sessions/${encodeURIComponent(sessionId)}/state`), fetch(`/ai/sessions/${encodeURIComponent(sessionId)}/runs`)]);
+        const historyResponse = await fetch(`/ai/sessions/${encodeURIComponent(sessionId)}/messages`);
         const history = await historyResponse.json(); messages.replaceChildren(); for (const item of history.messages || []) addMessage(item.role, item.content, false, item.attachments || []); if (!history.messages?.length) showWelcome();
-        const checkpoint = stateResponse.ok ? await stateResponse.json() : null;
-        const runData = runsResponse.ok ? await runsResponse.json() : {runs: []};
-        renderRunHistory(runData.runs || [], checkpoint);
       } catch (error) { messages.replaceChildren(); addMessage('assistant', `加载会话失败：${error.message}`); }
     }
     function parseSseBlock(block) {
@@ -909,27 +551,13 @@
           if (streamRenderFrame) return;
           streamRenderFrame = requestAnimationFrame(flushStreamRender);
         };
-        const resetStreamRender = status => {
-          if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
-          streamed = ''; streamTextNode = null; loadingBubble.className = 'bubble thinking'; loadingBubble.textContent = status;
-        };
         while (true) {
           const {value, done} = await reader.read(); buffer += decoder.decode(value || new Uint8Array(), {stream: !done});
           const blocks = buffer.split('\n\n'); buffer = blocks.pop() || '';
           for (const block of blocks) {
             if (!block.trim()) continue;
             const packet = parseSseBlock(block);
-            if (packet.event === 'graph') startGraph(packet.data);
-            else if (packet.event === 'token') { streamed += packet.data.content || ''; scheduleStreamRender(); }
-            else if (packet.event === 'node') {
-              appendNode(packet.data);
-              const requestedTools = packet.data.tool_calls || [];
-              if (packet.data.node === 'ContextCompaction') loadingBubble.textContent = '正在理解问题与附件…';
-              else if (packet.data.node === 'Agent' && requestedTools.length) {
-                resetStreamRender(`正在执行 ${requestedTools.map(call => call.name).join('、')}…`);
-              } else if (packet.data.node === 'ToolExecution') loadingBubble.textContent = '正在结合搜索证据生成回答…';
-            }
-            else if (packet.event === 'trace') appendTrace(packet.data);
+            if (packet.event === 'token') { streamed += packet.data.content || ''; scheduleStreamRender(); }
             else if (packet.event === 'final') finalData = packet.data;
             else if (packet.event === 'error') throw new Error(packet.data.detail);
           }
@@ -937,8 +565,8 @@
         }
         flushStreamRender();
         if (!finalData) throw new Error('流式响应未返回最终结果');
-        loading.remove(); addMessage('assistant', finalData.answer); appendFinalTrace(finalData); saveCurrentSession(); await refreshSessionsOnly();
-      } catch (error) { loading.remove(); addMessage('assistant', `请求失败：${error.message}`); if (currentTurnShell) { currentTurnShell.badge.textContent = '失败'; currentTurnShell.detail.textContent = error.message; } }
+        loading.remove(); addMessage('assistant', finalData.answer); saveCurrentSession(); await refreshSessionsOnly();
+      } catch (error) { loading.remove(); addMessage('assistant', `请求失败：${error.message}`); }
       finally { busy = false; sendButton.disabled = false; question.focus(); }
     }
     async function refreshSessionsOnly() { const response = await fetch('/ai/sessions'); sessions = (await response.json()).sessions || []; const active = sessions.find(item => item.session_id === currentSessionId); if (active) conversationTitle.textContent = active.title; renderSessionList(); }
@@ -953,14 +581,12 @@
     confirmDeleteButton.addEventListener('click', confirmDeleteSession);
     deleteModal.addEventListener('click', event => { if (event.target === deleteModal) closeDeleteModal(); });
     document.addEventListener('keydown', event => { if (event.key === 'Escape' && deleteModal.classList.contains('visible')) closeDeleteModal(); });
-    document.querySelector('#closeState').addEventListener('click', closeStateView);
     form.addEventListener('submit', event => { event.preventDefault(); send(question.value); });
     question.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); } });
     question.addEventListener('input', () => { question.style.height = 'auto'; question.style.height = `${Math.min(question.scrollHeight, 150)}px`; });
     attachmentButton.addEventListener('click', () => attachmentInput.click());
     attachmentInput.addEventListener('change', () => addSelectedAttachments(attachmentInput.files));
-    document.querySelector('#newSession').addEventListener('click', () => { if (busy) return; closeStateView(); currentSessionId = createSessionId(); saveCurrentSession(); conversationTitle.textContent = '新对话'; renderSessionList(); showWelcome(); currentTurnBody = null; currentTurnShell = null; traceBody.innerHTML = '<div class="empty-trace">新会话尚未执行。发送消息后将实时展示图执行过程。</div>'; if (window.matchMedia('(max-width: 760px)').matches) { drawerClosed = true; applyDrawerState(); } });
-    document.querySelector('#inspectState').addEventListener('click', async () => { try { const response = await fetch(`/ai/sessions/${encodeURIComponent(currentSessionId)}/state`); const data = await response.json(); if (!response.ok) throw new Error(data.detail || '暂无状态'); showStateView(data); } catch (error) { stateTree.replaceChildren(makeCard('json-card', '查看状态失败', 'error', error.message, true)); stateOverlay.classList.add('visible'); } });
+    document.querySelector('#newSession').addEventListener('click', () => { if (busy) return; currentSessionId = createSessionId(); saveCurrentSession(); conversationTitle.textContent = '新对话'; renderSessionList(); showWelcome(); if (window.matchMedia('(max-width: 760px)').matches) { drawerClosed = true; applyDrawerState(); } });
     loadSessions().catch(error => { sessionList.innerHTML = `<div class="history-empty">加载失败：${escapeHtml(error.message)}</div>`; showWelcome(); });
   </script>
 </body>

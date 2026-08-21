@@ -26,18 +26,6 @@ class ContextSummary(BaseModel):
     referenced_artifacts: list[str] = Field(default_factory=list)
 
 
-class TokenLedger(BaseModel):
-    """按消息 ID 增量维护的上下文 Token 估算账本。"""
-
-    message_tokens: dict[str, int] = Field(default_factory=dict)
-    message_fingerprints: dict[str, str] = Field(default_factory=dict)
-    active_message_tokens: int = 0
-    summary_tokens: int = 0
-    protocol_overhead_tokens: int = 0
-    last_estimated_prompt_tokens: int = 0
-    last_actual_prompt_tokens: int | None = None
-
-
 class ContextMetrics(BaseModel):
     """一次上下文预算检查的可观测指标，供 Harness 面板展示。"""
 
@@ -47,23 +35,17 @@ class ContextMetrics(BaseModel):
     retain_ratio: float = 0.16
     recent_budget_tokens: int = 0
     summary_budget_tokens: int = 0
-    tool_result_budget_tokens: int = 0
-    active_message_tokens: int = 0
     summary_tokens: int = 0
     model_input_tokens: int = 0
     model_input_source: Literal["estimated", "api_usage"] = "estimated"
     messages_before: int = 0
     messages_after: int = 0
     compacted_messages: int = 0
-    pruned_tool_messages: int = 0
     tokens_before_compaction: int = 0
     tokens_after_compaction: int = 0
     reduced_tokens: int = 0
     converged: bool = False
-    compacted_message_ids: list[str] = Field(default_factory=list)
-    retained_message_ids: list[str] = Field(default_factory=list)
     summary_version: int = 0
-    fallback_used: bool = False
 
 
 class TurnTokenUsage(BaseModel):
@@ -111,13 +93,12 @@ class ChatRequest(BaseModel):
 
     question: str = ""
     session_id: str = "default"
-    images: list[str] = Field(default_factory=list)
     attachments: list[AttachmentInput] = Field(default_factory=list, max_length=5)
     force_compaction: bool = False
 
     @model_validator(mode="after")
     def require_content(self):
-        if not self.question.strip() and not self.images and not self.attachments:
+        if not self.question.strip() and not self.attachments:
             raise ValueError("question or attachment is required")
         if any(not item.mime_type.startswith("image/") for item in self.attachments):
             raise ValueError("当前阶段只支持图片附件")
@@ -134,7 +115,6 @@ class ChatResponse(BaseModel):
     context_metrics: ContextMetrics
     token_usage: TurnTokenUsage
     context_summary: ContextSummary
-    attachment_artifacts: list[dict]
     compacted: bool
 
 

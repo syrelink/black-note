@@ -24,33 +24,19 @@ search_backend = DuckDuckGoSearch()
 
 
 @tool
-def skill(name: str) -> str:
-    """按名称加载一个 Skill；返回完整 SKILL.md，供下一次 Agent Step 按其中流程执行。"""
+def read_skill_file(name: str, path: str = "SKILL.md") -> str:
+    """按需读取 Skill 的 SKILL.md 或其 references/*.md，其他路径一律拒绝。"""
     try:
-        document = skill_registry.load(name.strip())
+        normalized = path.strip()
+        document = skill_registry.load(
+            name.strip(),
+            None if normalized == "SKILL.md" else normalized,
+        )
     except Exception as exc:
         return json.dumps({
             "error": str(exc),
             "error_type": exc.__class__.__name__,
-            "tool": "skill",
-        }, ensure_ascii=False)
-    return json.dumps({
-        "status": "loaded",
-        "skill": document.name,
-        "content": document.content,
-    }, ensure_ascii=False)
-
-
-@tool
-def read_skill_reference(name: str, path: str) -> str:
-    """读取 Skill 明确引用的 references/*.md；只有 SKILL.md 要求且任务需要时才调用。"""
-    try:
-        document = skill_registry.load(name.strip(), path.strip())
-    except Exception as exc:
-        return json.dumps({
-            "error": str(exc),
-            "error_type": exc.__class__.__name__,
-            "tool": "read_skill_reference",
+            "tool": "read_skill_file",
         }, ensure_ascii=False)
     return json.dumps({
         "status": "loaded",
@@ -86,4 +72,4 @@ async def web_search(query: str) -> str:
 
 
 # 只有列表中的函数会通过 model.bind_tools 暴露给主 Agent。
-AGENT_TOOLS = [skill, read_skill_reference, web_search]
+AGENT_TOOLS = [read_skill_file, web_search]

@@ -6,8 +6,8 @@ pydantic
 PyYAML>=6.0
 langchain
 langchain-openai
+langfuse
 psycopg[binary,pool]>=3.2
 pytest
 pytest-asyncio
-pypdf>=5.0
 minio>=7.2
